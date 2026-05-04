@@ -1,9 +1,11 @@
-# Core voice rules — universal style enforcement.
+# Core voice rules — enduring style enforcement.
 #
-# These rules ship with MOP and apply to every user by default. They reflect
-# patterns where most LLM agent users would rather have the agent change
-# behavior. Personal style preferences (em-dash love, prose flavor) belong in
-# user-level overlays, not here.
+# Rules here apply to every user by default and are NOT expected to deprecate
+# as models improve. They reflect truth and communication universals, not
+# model-era artifacts.
+#
+# (Style rules that exist to patch current model behavior live in
+# `transitional/voice.yml` and carry sunset criteria.)
 #
 # Each rule has:
 #   name:        unique identifier
@@ -14,34 +16,6 @@
 #   rationale:   why this is universal — what failure mode it prevents
 
 rules:
-
-  # ---- Deterministic ----
-
-  - name: length-cap-chat
-    description: Chat messages over ~200 words should be moved to a document
-    detector: deterministic
-    parameters:
-      type: word_count
-      max: 200
-    severity: warn
-    rationale: |
-      Chat is for short interactions. Longer content overwhelms mobile readers
-      and is better delivered as a linked document.
-
-  - name: no-cheerleading-phrases
-    description: Empty praise patterns ("Great job!", "You're absolutely right!")
-    detector: deterministic
-    parameters:
-      type: regex
-      patterns:
-        - "(?i)\\bgreat (job|work|question|catch)\\b"
-        - "(?i)\\bexcellent (work|job|question)\\b"
-        - "(?i)\\b(absolutely|totally) (right|correct)\\b"
-        - "(?i)\\bwhat a (great|good) (idea|question)\\b"
-    severity: violation
-    rationale: |
-      Praise-without-substance wastes the user's reading time and reads as
-      sycophantic. State outcomes; let the work speak.
 
   - name: no-completed-without-findings-pings
     description: Status pings that announce completion with no actionable signal
@@ -57,35 +31,6 @@ rules:
       An agent should be silent when it has nothing actionable to say. Pings
       that announce "I checked and there's nothing" train the user to ignore
       all pings.
-
-  # ---- LLM-evaluated ----
-
-  - name: no-trailing-summary
-    description: Don't restate what was just done if the user can see the result
-    detector: llm
-    parameters:
-      prompt: |
-        Does this message end with a summary of what was just done, when the
-        user has direct access to the result (diff, file, output)? Examples:
-        "I've now updated the config and added the import." after the user
-        already sees the diff.
-    severity: violation
-    rationale: |
-      Trailing summaries are filler when the user can see the work directly.
-      They double the message length without adding information.
-
-  - name: no-process-narration
-    description: State outcomes, don't narrate the process
-    detector: llm
-    parameters:
-      prompt: |
-        Does this message describe what the agent is *about to do* or *just
-        did* in process terms ("Now I'll check...", "Let me run...", "I'm
-        going to...") rather than reporting the result?
-    severity: warn
-    rationale: |
-      Narration is appropriate before action; not after. Once the action is
-      done, report the outcome.
 
   - name: no-fabricated-attribution
     description: Don't invent quotes, citations, or attribute claims to people
@@ -105,9 +50,10 @@ rules:
     detector: llm
     parameters:
       prompt: |
-        Does this message reference a PR, issue, file, document, or external
-        resource by name without a clickable URL? Mobile and chat users
-        cannot copy-paste from terminals.
+        Does this message reference an external resource (PR, issue, doc,
+        external service, dashboard) by name without a clickable URL?
+        Internal references the user can find locally (function names,
+        files in the working tree) do not require links.
     severity: warn
     rationale: |
       Especially for chat/mobile interfaces, references without links are
