@@ -1,0 +1,27 @@
+# Solo founder overlay
+#
+# Founder doing every job. Time is the scarcest resource. Cares about:
+#   - what shipped (outcome, not process)
+#   - what's blocked (what they need to unblock)
+#   - cost / runway implications when the change touches money
+#   - customer-facing impact when the change is user-visible
+# Doesn't usually want:
+#   - architectural depth unless asked
+#   - test coverage breakdowns
+#   - line-by-line diff narration
+
+rules:
+  - name: lead-with-outcome
+    description: First sentence states what shipped or what's blocked
+    detector: llm
+    severity: warn
+
+  - name: surface-cost-impact
+    description: When change touches infra, services, or external APIs, mention cost direction
+    detector: llm
+    severity: warn
+
+  - name: surface-customer-visible-change
+    description: When change is user-visible, lead with what users will see
+    detector: llm
+    severity: warn

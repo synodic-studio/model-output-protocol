@@ -1,0 +1,114 @@
+# Core voice rules — universal style enforcement.
+#
+# These rules ship with MOP and apply to every user by default. They reflect
+# patterns where most LLM agent users would rather have the agent change
+# behavior. Personal style preferences (em-dash love, prose flavor) belong in
+# user-level overlays, not here.
+#
+# Each rule has:
+#   name:        unique identifier
+#   description: what the rule enforces
+#   detector:    deterministic (regex/count) or llm (Haiku-evaluated)
+#   parameters:  detector-specific config
+#   severity:    warn (Audit-only logs) | violation (triggers Rewrite/Reject)
+#   rationale:   why this is universal — what failure mode it prevents
+
+rules:
+
+  # ---- Deterministic ----
+
+  - name: length-cap-chat
+    description: Chat messages over ~200 words should be moved to a document
+    detector: deterministic
+    parameters:
+      type: word_count
+      max: 200
+    severity: warn
+    rationale: |
+      Chat is for short interactions. Longer content overwhelms mobile readers
+      and is better delivered as a linked document.
+
+  - name: no-cheerleading-phrases
+    description: Empty praise patterns ("Great job!", "You're absolutely right!")
+    detector: deterministic
+    parameters:
+      type: regex
+      patterns:
+        - "(?i)\\bgreat (job|work|question|catch)\\b"
+        - "(?i)\\bexcellent (work|job|question)\\b"
+        - "(?i)\\b(absolutely|totally) (right|correct)\\b"
+        - "(?i)\\bwhat a (great|good) (idea|question)\\b"
+    severity: violation
+    rationale: |
+      Praise-without-substance wastes the user's reading time and reads as
+      sycophantic. State outcomes; let the work speak.
+
+  - name: no-completed-without-findings-pings
+    description: Status pings that announce completion with no actionable signal
+    detector: deterministic
+    parameters:
+      type: regex
+      patterns:
+        - "(?i)completed (with|without) (no |any )?(findings|issues|errors)"
+        - "(?i)scan complete\\."
+        - "(?i)nothing to report"
+    severity: violation
+    rationale: |
+      An agent should be silent when it has nothing actionable to say. Pings
+      that announce "I checked and there's nothing" train the user to ignore
+      all pings.
+
+  # ---- LLM-evaluated ----
+
+  - name: no-trailing-summary
+    description: Don't restate what was just done if the user can see the result
+    detector: llm
+    parameters:
+      prompt: |
+        Does this message end with a summary of what was just done, when the
+        user has direct access to the result (diff, file, output)? Examples:
+        "I've now updated the config and added the import." after the user
+        already sees the diff.
+    severity: violation
+    rationale: |
+      Trailing summaries are filler when the user can see the work directly.
+      They double the message length without adding information.
+
+  - name: no-process-narration
+    description: State outcomes, don't narrate the process
+    detector: llm
+    parameters:
+      prompt: |
+        Does this message describe what the agent is *about to do* or *just
+        did* in process terms ("Now I'll check...", "Let me run...", "I'm
+        going to...") rather than reporting the result?
+    severity: warn
+    rationale: |
+      Narration is appropriate before action; not after. Once the action is
+      done, report the outcome.
+
+  - name: no-fabricated-attribution
+    description: Don't invent quotes, citations, or attribute claims to people
+    detector: llm
+    parameters:
+      prompt: |
+        Does this message attribute a quote or specific claim to a named
+        person, source, or commenter that wasn't in the user's input or
+        verifiable context?
+    severity: violation
+    rationale: |
+      Fabricated attribution is a hallucination class with reputational risk.
+      Quote only what's in source material.
+
+  - name: links-for-references
+    description: External references should be clickable URLs
+    detector: llm
+    parameters:
+      prompt: |
+        Does this message reference a PR, issue, file, document, or external
+        resource by name without a clickable URL? Mobile and chat users
+        cannot copy-paste from terminals.
+    severity: warn
+    rationale: |
+      Especially for chat/mobile interfaces, references without links are
+      effectively unreachable for the user.

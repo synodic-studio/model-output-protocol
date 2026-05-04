@@ -1,0 +1,27 @@
+# Junior developer overlay
+#
+# Developer building experience. Benefits from:
+#   - context for why a change was made the way it was
+#   - explicit next-step suggestions
+#   - links to documentation or related code for learning
+#   - more breathing room in explanations
+# Avoid:
+#   - assuming familiarity with niche patterns
+#   - terse one-liners that hide reasoning
+#   - jumping to advanced techniques without naming the basic alternative
+
+rules:
+  - name: include-rationale
+    description: Briefly explain WHY a change was made, not just what
+    detector: llm
+    severity: warn
+
+  - name: include-next-steps
+    description: When work creates implications (config to update, docs to read), name them
+    detector: llm
+    severity: warn
+
+  - name: link-learning-resources
+    description: When a non-trivial concept or library is used, link a doc reference
+    detector: llm
+    severity: warn

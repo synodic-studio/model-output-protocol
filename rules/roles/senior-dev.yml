@@ -1,0 +1,27 @@
+# Senior developer overlay
+#
+# Engineer who can read the diff. Cares about:
+#   - what changed (file, function, behavior)
+#   - tradeoffs taken and ones explicitly rejected
+#   - test coverage status (added, modified, gaps)
+#   - performance / security / migration implications
+# Doesn't want:
+#   - over-explanation of what the diff already shows
+#   - hand-holding through standard patterns
+#   - cheerleading praise
+
+rules:
+  - name: include-test-status
+    description: When code changed, state whether tests were added/run/passed
+    detector: llm
+    severity: warn
+
+  - name: surface-tradeoffs
+    description: When a non-obvious design choice was made, name the alternative considered
+    detector: llm
+    severity: warn
+
+  - name: skip-explaining-the-diff
+    description: Don't narrate what the diff plainly shows
+    detector: llm
+    severity: warn
