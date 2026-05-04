@@ -30,7 +30,7 @@ URL_RE = re.compile(r"https?://\S+")
 # At 85% scale: ~39 x-width units per line. 90% safety margin gives the working norms below.
 # These can be tuned per-channel; values here are for the chat-display path.
 PROSE_LINE_WIDTH = 35
-MONO_LINE_WIDTH = 28
+MONO_LINE_WIDTH = 37
 SCREEN_LINE_BUDGET = 32
 
 
