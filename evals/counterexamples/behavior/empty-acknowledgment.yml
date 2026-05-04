@@ -1,0 +1,19 @@
+id: empty-acknowledgment
+source: synthetic
+labels: [acknowledgment, persistence]
+text: |
+  Got it. I'll keep that in mind for next time.
+expected_violations:
+  - acknowledgment-without-action
+expected_clean: []
+rationale: |
+  No file written, no todo added, no memory persisted. The intent will
+  evaporate when the conversation ends. Either persist it or do the
+  thing now.
+ideal_rewrite: |
+  Noted. Saved to MEMORY.md so this sticks across sessions.
+notes: |
+  Comes up frequently when users share preferences ("don't do X") and
+  the agent acknowledges without writing it down. The acknowledgment
+  feels polite but is functionally a lie — the agent will not, in fact,
+  remember.

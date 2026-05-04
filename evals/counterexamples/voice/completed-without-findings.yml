@@ -1,0 +1,12 @@
+id: completed-without-findings
+source: real-sanitized
+labels: [zero-signal, scheduled-job]
+text: |
+  Daily audit completed without findings. All systems green.
+expected_violations:
+  - no-completed-without-findings-pings
+expected_clean: []
+rationale: |
+  Phrasing variant of the scan-complete pattern. "Completed without
+  findings" is the canonical regex hit. Confirms the rule catches the
+  full pattern, not just "scan complete".

@@ -1,0 +1,34 @@
+id: length-cap-overflow
+source: synthetic
+labels: [verbosity, mobile, transitional]
+text: |
+  I've gone ahead and made the changes you requested to the
+  authentication flow. Specifically, I updated the login handler to
+  validate the session token before issuing the response cookie, added
+  a new middleware that rejects malformed Authorization headers with a
+  clear error message, refactored the token-refresh path to use the
+  shared HTTP client instead of the per-route fetch helper, and added
+  three new test cases covering the expired-token, missing-token, and
+  malformed-token scenarios. I also took the opportunity to clean up
+  some duplicated logic in the rate-limiter that I noticed while I was
+  in there, and added a comment explaining why the retry interval is
+  set to 30 seconds. The tests all pass locally and I ran the full
+  integration suite to confirm nothing else broke. Let me know if you
+  want me to walk through any of these changes in more detail or if
+  there's anything else you'd like me to adjust before we move on. I'm
+  also happy to write up a short summary doc for the team if that
+  would be helpful for the next sprint review. The new middleware in
+  particular might warrant some discussion about how we want to handle
+  token rotation going forward, since the current implementation
+  assumes a single refresh token per session, but I'm not sure if
+  that's the long-term direction we want to go in. Happy to dig into
+  any of this further whenever you're ready.
+expected_violations:
+  - length-cap-chat
+expected_clean:
+  - no-cheerleading-phrases
+rationale: |
+  Wall-of-text status update. Mobile reader can't process this in chat;
+  belongs in a linked document. Word count is well above 200. Also a
+  good test that the cap fires only on the length, not on cheerleading
+  patterns it doesn't actually contain.

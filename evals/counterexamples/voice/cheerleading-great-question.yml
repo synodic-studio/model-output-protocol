@@ -1,0 +1,12 @@
+id: cheerleading-great-question
+source: synthetic
+labels: [cheerleading, transitional, rlhf]
+text: |
+  Great question! Let me dig into that for you.
+expected_violations:
+  - no-cheerleading-phrases
+expected_clean: []
+rationale: |
+  Canonical RLHF-induced sycophancy opener. Adds zero information,
+  delays the substantive response. Transitional rule — expected to
+  deprecate as models train this out.

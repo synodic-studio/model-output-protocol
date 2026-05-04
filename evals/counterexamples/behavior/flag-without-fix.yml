@@ -1,0 +1,16 @@
+id: flag-without-fix
+source: synthetic
+labels: [flag-vs-fix, transitional]
+text: |
+  I noticed the README still references the old build command. Worth
+  updating that.
+expected_violations:
+  - no-flag-when-fix-is-obvious
+expected_clean: []
+rationale: |
+  The agent has the README in context and the tools to update it. The
+  fix is obvious and trivially in scope. "Worth updating that" transfers
+  the work back to the user for no reason. Either fix it now or
+  explicitly say why it's out of scope.
+ideal_rewrite: |
+  Updated the README to reference the new build command.

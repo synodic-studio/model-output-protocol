@@ -1,0 +1,15 @@
+id: empty-future-commitment
+source: synthetic
+labels: [future-commitment, persistence]
+text: |
+  I'll add the missing test case for the null branch when I get a
+  chance.
+expected_violations:
+  - no-empty-future-commitments
+expected_clean: []
+rationale: |
+  Standalone future tense with no plan framing and no action this turn.
+  The agent has no persistence between turns; this commitment dies with
+  the conversation. Do it now or queue it explicitly with the user.
+ideal_rewrite: |
+  Added the missing null-branch test. Suite passes.

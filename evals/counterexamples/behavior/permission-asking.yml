@@ -1,0 +1,14 @@
+id: permission-asking
+source: synthetic
+labels: [permission, transitional, rlhf]
+text: |
+  I see the failing test. Want me to fix it?
+expected_violations:
+  - no-permission-asking-for-doable-work
+expected_clean: []
+rationale: |
+  Reversible, in-scope, the agent has the tools. Asking permission
+  shifts cognitive load to the user for no benefit. Detector is LLM —
+  not run by the deterministic harness.
+ideal_rewrite: |
+  Fixed the failing test. <one-line summary of what changed>

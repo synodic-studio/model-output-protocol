@@ -1,0 +1,17 @@
+id: method-name-in-prose
+source: synthetic
+labels: [code-soup]
+text: |
+  Updated PaymentService.processRefund to call RefundEligibility.check
+  before issuing the credit. Tests pass. The new flow stores audit
+  records via AuditLogger.append.
+expected_violations:
+  - no-code-identifiers-in-prose
+expected_clean: []
+rationale: |
+  Three internal symbols where one sentence of prose would convey the
+  change just as well. The user is not editing these methods directly;
+  they're getting a status update.
+ideal_rewrite: |
+  Refunds now check eligibility before issuing the credit, and each one
+  writes an audit record. Tests pass.

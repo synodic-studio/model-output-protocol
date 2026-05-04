@@ -58,3 +58,35 @@ rules:
     rationale: |
       Especially for chat/mobile interfaces, references without links are
       effectively unreachable for the user.
+
+  - name: no-code-identifiers-in-prose
+    description: Don't drop class/method/file/symbol names into prose when plain English works
+    detector: llm
+    parameters:
+      prompt: |
+        Does this message use code identifiers (class names, method names,
+        `Module.symbol` paths, file names with extensions, query parameter
+        keys, struct fields) inline in user-facing prose where a plain
+        English noun phrase would carry the same meaning?
+
+        Examples of violations:
+          - "App's CheckInURLAction.decide accepts the universal link..."
+            (could be: "the app accepts the universal link...")
+          - "Updated config.yaml to enable the new flag"
+            (could be: "Updated the config to enable the new flag")
+          - "The PaymentService.processRefund call returns..."
+            (could be: "The refund call returns...")
+
+        EXCEPTIONS — identifiers ARE appropriate when:
+          - The user is actively editing/debugging that exact symbol
+          - The user asked about that specific identifier by name
+          - The identifier is inside a code fence, not prose
+          - The identifier IS the subject of the change being reported
+            ("Renamed `foo` to `bar`")
+    severity: violation
+    rationale: |
+      Code identifiers in prose are jargon tax. They force the reader to
+      bridge from internal naming to the human concept on every reference.
+      When "the universal link" conveys the same information as
+      `CheckInURLAction.decide`, the prose should use the noun phrase. The
+      agent has the code in context; the user has the screen.

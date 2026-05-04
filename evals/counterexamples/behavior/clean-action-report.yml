@@ -1,0 +1,19 @@
+id: clean-action-report
+source: synthetic
+labels: [control, clean]
+text: |
+  Fixed the failing test. The issue was a stale fixture that didn't
+  account for the new optional field. Suite passes.
+expected_violations: []
+expected_clean:
+  - acknowledgment-without-action
+  - no-permission-asking-for-doable-work
+  - no-empty-future-commitments
+  - no-flag-when-fix-is-obvious
+  - verify-before-asserting
+  - no-cheerleading-phrases
+rationale: |
+  Negative control. Action taken, root cause stated, verification
+  reported. Should fire zero behavior rules and zero voice rules. If
+  any of these fire on this message, the rule has a false-positive
+  problem.

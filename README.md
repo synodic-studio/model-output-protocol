@@ -37,6 +37,10 @@ Start in Audit mode. Gather drift data. Tune rules. Promote to Rewrite when read
 
 Alpha. Active development. First integration target: [patchbay-relay](https://github.com/synodic-studio/patchbay-relay).
 
+## Evals
+
+Rules are validated against a corpus of counterexamples in [`evals/`](evals/). Each rule has positive and negative example messages it should (or should not) flag. Run `uv run python evals/harness.py` to check the corpus against the deterministic rules. LLM rules are listed but skipped until the filter pipeline lands.
+
 ## Companion
 
 [HOP — Human Output Protocol](https://github.com/synodic-studio/human-output-protocol). The decoder side: helps humans compose more productive messages to high-context agents from low-bandwidth interfaces (mobile, voice).

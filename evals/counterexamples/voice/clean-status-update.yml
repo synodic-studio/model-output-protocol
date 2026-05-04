@@ -1,0 +1,15 @@
+id: clean-status-update
+source: synthetic
+labels: [control, clean]
+text: |
+  Refunds now check eligibility before issuing the credit. Each one
+  writes an audit record. Tests pass.
+expected_violations: []
+expected_clean:
+  - no-code-identifiers-in-prose
+  - no-completed-without-findings-pings
+  - no-cheerleading-phrases
+rationale: |
+  Negative control. Plain English status update. No code identifiers, no
+  empty-completion ping, no cheerleading. Should fire zero rules — useful
+  to confirm rules don't blanket-flag short status messages.

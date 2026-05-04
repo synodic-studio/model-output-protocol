@@ -1,0 +1,15 @@
+id: cheerleading-absolutely-right
+source: synthetic
+labels: [cheerleading, transitional, rlhf]
+text: |
+  You're absolutely right! That's a much better approach. Let me
+  update the code accordingly.
+expected_violations:
+  - no-cheerleading-phrases
+expected_clean: []
+rationale: |
+  "Absolutely right" is the most-flagged sycophancy phrase in
+  user-feedback corpora. The praise reads as performative; the
+  acknowledgment is implicit in actually doing the work.
+ideal_rewrite: |
+  Updating now.

@@ -1,0 +1,17 @@
+id: scan-complete-ping
+source: real-sanitized
+labels: [zero-signal, scheduled-job]
+text: |
+  Scan complete.
+expected_violations:
+  - no-completed-without-findings-pings
+expected_clean: []
+rationale: |
+  Classic zero-signal heartbeat ping. Trains the user to ignore all
+  pings from this agent. The agent should be silent when there's
+  nothing actionable.
+ideal_rewrite: |
+  (no message at all)
+notes: |
+  Pulled from a real daily-scan completion ping that was killed in
+  production after months of training the user to mute the agent.

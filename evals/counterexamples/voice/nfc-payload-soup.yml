@@ -1,0 +1,34 @@
+id: nfc-payload-soup
+source: real-sanitized
+labels: [code-soup, mobile, technical-detail]
+text: |
+  NFC payload notes (read from repo):
+  • App's CheckInURLAction.decide accepts the universal link
+    https://link.example.com/checkin with optional ?nfc=<code> and
+    ?status=<rawValue>. Empty query → marks .present.
+  • Custom scheme example://checkin works as fallback.
+  • Single shared promo code is fine — physical possession of the tag
+    IS the auth (per the source comment in CheckInURLAction.swift).
+expected_violations:
+  - no-code-identifiers-in-prose
+expected_clean:
+  - no-completed-without-findings-pings
+  - no-cheerleading-phrases
+rationale: |
+  Reads as a code-spec dump. "Universal link" alone carries the meaning
+  for the user; CheckInURLAction.decide, .present, and
+  CheckInURLAction.swift are jargon tax for a non-debugging context. The
+  user reaction that surfaced this rule was "perfect example here of just
+  how terribly complex it gets when basic human-readable details like
+  'universal link' will suffice."
+ideal_rewrite: |
+  NFC tag check-in:
+  • The app accepts a universal link (https://link.example.com/checkin),
+    with optional nfc-code and status fields. Empty query = "present".
+  • Custom URL scheme works as a fallback.
+  • One shared promo code is fine — possession of the tag is the auth.
+notes: |
+  Original was sent to the user via Telegram on 2026-05-03. Domain
+  generalized from internal subdomain to example.com. The
+  CheckInURLAction class name is preserved verbatim because it IS the
+  thing being demonstrated as inappropriate.

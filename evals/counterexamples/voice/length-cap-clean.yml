@@ -1,0 +1,15 @@
+id: length-cap-clean
+source: synthetic
+labels: [control, clean]
+text: |
+  Auth flow updated. Three new tests cover expired, missing, and
+  malformed tokens. Full doc at /docs/auth-changes.
+expected_violations: []
+expected_clean:
+  - length-cap-chat
+  - no-cheerleading-phrases
+  - no-completed-without-findings-pings
+rationale: |
+  Negative control for the length cap. Same content category as
+  length-cap-overflow but compressed to a chat-appropriate three
+  sentences with a link out for detail. Should fire zero rules.
