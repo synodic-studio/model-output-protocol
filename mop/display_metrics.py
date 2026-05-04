@@ -25,6 +25,14 @@ LIST_ITEM_RE = re.compile(
 EM_DASH_RE = re.compile(r"—")
 URL_RE = re.compile(r"https?://\S+")
 
+# Telegram iOS rendering norms, calibrated against Adrien's setup at 85% text size.
+# At 100% iOS scale: ~33 chars per line in both monospace and proportional (x-width baseline).
+# At 85% scale: ~39 x-width units per line. 90% safety margin gives the working norms below.
+# These can be tuned per-channel; values here are for the chat-display path.
+PROSE_LINE_WIDTH = 35
+MONO_LINE_WIDTH = 28
+SCREEN_LINE_BUDGET = 32
+
 
 def word_count(text: str) -> int:
     return len(text.split())
@@ -40,6 +48,37 @@ def line_count(text: str) -> int:
 
 def max_line_width(text: str) -> int:
     return max((len(line) for line in text.splitlines()), default=0)
+
+
+def rendered_line_count(
+    text: str,
+    prose_width: int = PROSE_LINE_WIDTH,
+    mono_width: int = MONO_LINE_WIDTH,
+) -> int:
+    """Estimate rendered height after wrapping.
+
+    Each newline is one line. Long lines wrap at prose_width, or mono_width
+    inside ``` fences. Empty lines count as 1.
+    """
+    if not text:
+        return 0
+    in_code = False
+    total = 0
+    for line in text.split("\n"):
+        if line.lstrip().startswith("```"):
+            in_code = not in_code
+            total += 1
+            continue
+        width = mono_width if in_code else prose_width
+        if not line:
+            total += 1
+        else:
+            total += -(-len(line) // width)
+    return total
+
+
+def overflows_screen(text: str, budget: int = SCREEN_LINE_BUDGET) -> bool:
+    return rendered_line_count(text) > budget
 
 
 def list_item_count(text: str) -> int:
@@ -71,6 +110,8 @@ def compute_all(text: str) -> dict:
         "char_count": char_count(text),
         "line_count": line_count(text),
         "max_line_width": max_line_width(text),
+        "rendered_line_count": rendered_line_count(text),
+        "overflows_screen": overflows_screen(text),
         "list_item_count": list_item_count(text),
         "code_block_chars": code_block_chars(text),
         "code_block_ratio": round(code_block_ratio(text), 4),
