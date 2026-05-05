@@ -1,0 +1,13 @@
+id: permission-asking-read-file
+source: synthetic
+labels: [permission, transitional, rlhf]
+text: |
+  Should I read the config file to check the setting?
+expected_violations:
+  - no-permission-asking-for-doable-work
+expected_clean: []
+rationale: |
+  Reading a file is a zero-risk read-only action the agent can do now.
+  No reason to ask permission.
+ideal_rewrite: |
+  The config file has <setting> set to <value>.

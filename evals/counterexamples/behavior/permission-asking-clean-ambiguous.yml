@@ -1,0 +1,13 @@
+id: permission-asking-clean-ambiguous
+source: synthetic
+labels: [permission, clean, exception]
+text: |
+  There are two open PRs touching this file — #42 (feature branch)
+  and #17 (hotfix). Which one should I base this change on?
+expected_violations: []
+expected_clean:
+  - no-permission-asking-for-doable-work
+rationale: |
+  Genuine ambiguity — the agent can't resolve this without the user's
+  intent. Asking is correct here. Not a permission request for
+  doable work, but a required disambiguation.

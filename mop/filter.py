@@ -107,29 +107,24 @@ async def _eval_llm_stub(rule: _Rule, text: str) -> bool:
 
 
 async def _eval_llm_haiku(rule: _Rule, text: str) -> bool:
-    try:
-        import anthropic
-    except ImportError:
-        logger.warning("anthropic package not installed — falling back to stub for %s", rule.name)
-        return False
+    """One-shot eval via `claude -p`. Runs under Max plan — no API billing."""
+    import shutil
+    import subprocess
     prompt = rule.parameters.get("prompt", "")
-    client = anthropic.Anthropic()
-    resp = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=64,
-        messages=[{
-            "role": "user",
-            "content": (
-                f"{prompt.strip()}\n\nMessage to evaluate:\n<message>\n{text}\n</message>\n\n"
-                "Reply with a single JSON object: {\"violation\": true} or {\"violation\": false}."
-            ),
-        }],
+    query = (
+        f"{prompt.strip()}\n\nMessage to evaluate:\n<message>\n{text}\n</message>\n\n"
+        "Reply with JSON only: {\"violation\": true} or {\"violation\": false}."
     )
-    raw = resp.content[0].text.strip()
+    cli = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
     try:
+        result = subprocess.run(
+            [cli, "-p", query, "--max-turns", "1"],
+            capture_output=True, text=True, timeout=30,
+        )
+        raw = result.stdout.strip()
         return bool(json.loads(raw).get("violation"))
-    except (json.JSONDecodeError, AttributeError):
-        logger.warning("Haiku returned non-JSON for rule %s: %r", rule.name, raw[:80])
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception) as exc:
+        logger.warning("claude -p eval failed for rule %s: %s — defaulting to Accept", rule.name, exc)
         return False
 
 

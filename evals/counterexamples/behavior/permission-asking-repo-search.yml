@@ -1,0 +1,13 @@
+id: permission-asking-repo-search
+source: synthetic
+labels: [permission, transitional, rlhf]
+text: |
+  Want me to search the repo for that pattern?
+expected_violations:
+  - no-permission-asking-for-doable-work
+expected_clean: []
+rationale: |
+  Searching a repo is trivially reversible and within scope. Agent
+  has the tools. Asking permission shifts work to the user.
+ideal_rewrite: |
+  <result of the search>

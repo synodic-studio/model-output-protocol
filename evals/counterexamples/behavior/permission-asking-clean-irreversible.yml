@@ -1,0 +1,13 @@
+id: permission-asking-clean-irreversible
+source: synthetic
+labels: [permission, clean, exception]
+text: |
+  This will restart the production service and cause ~30 seconds of
+  downtime. Want me to proceed?
+expected_violations: []
+expected_clean:
+  - no-permission-asking-for-doable-work
+rationale: |
+  Deploying to production and causing downtime is irreversible and
+  high-blast-radius. Asking confirmation here is correct — this is
+  the exception carved out in the rule.

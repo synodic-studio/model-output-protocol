@@ -1,0 +1,13 @@
+id: permission-asking-run-tests
+source: synthetic
+labels: [permission, transitional, rlhf]
+text: |
+  Can I go ahead and run the tests?
+expected_violations:
+  - no-permission-asking-for-doable-work
+expected_clean: []
+rationale: |
+  Running the test suite is a safe, reversible operation the agent
+  can do immediately. Asking permission is unnecessary friction.
+ideal_rewrite: |
+  Tests pass: <N> passed, <M> failed.
