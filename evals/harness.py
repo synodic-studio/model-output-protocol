@@ -35,7 +35,7 @@ except ImportError:
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-RULES_DIR = REPO_ROOT / "rules"
+RULES_DIR = REPO_ROOT / "rules" / "active"
 CORPUS_DIR = Path(__file__).resolve().parent / "counterexamples"
 
 

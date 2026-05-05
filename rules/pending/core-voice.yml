@@ -1,0 +1,92 @@
+# Core voice rules — enduring style enforcement.
+#
+# Rules here apply to every user by default and are NOT expected to deprecate
+# as models improve. They reflect truth and communication universals, not
+# model-era artifacts.
+#
+# (Style rules that exist to patch current model behavior live in
+# `transitional/voice.yml` and carry sunset criteria.)
+#
+# Each rule has:
+#   name:        unique identifier
+#   description: what the rule enforces
+#   detector:    deterministic (regex/count) or llm (Haiku-evaluated)
+#   parameters:  detector-specific config
+#   severity:    warn (Audit-only logs) | violation (triggers Rewrite/Reject)
+#   rationale:   why this is universal — what failure mode it prevents
+
+rules:
+
+  - name: no-completed-without-findings-pings
+    description: Status pings that announce completion with no actionable signal
+    detector: deterministic
+    parameters:
+      type: regex
+      patterns:
+        - "(?i)completed (with|without) (no |any )?(findings|issues|errors)"
+        - "(?i)scan complete\\."
+        - "(?i)nothing to report"
+    severity: violation
+    rationale: |
+      An agent should be silent when it has nothing actionable to say. Pings
+      that announce "I checked and there's nothing" train the user to ignore
+      all pings.
+
+  - name: no-fabricated-attribution
+    description: Don't invent quotes, citations, or attribute claims to people
+    detector: llm
+    parameters:
+      prompt: |
+        Does this message attribute a quote or specific claim to a named
+        person, source, or commenter that wasn't in the user's input or
+        verifiable context?
+    severity: violation
+    rationale: |
+      Fabricated attribution is a hallucination class with reputational risk.
+      Quote only what's in source material.
+
+  - name: links-for-references
+    description: External references should be clickable URLs
+    detector: llm
+    parameters:
+      prompt: |
+        Does this message reference an external resource (PR, issue, doc,
+        external service, dashboard) by name without a clickable URL?
+        Internal references the user can find locally (function names,
+        files in the working tree) do not require links.
+    severity: warn
+    rationale: |
+      Especially for chat/mobile interfaces, references without links are
+      effectively unreachable for the user.
+
+  - name: no-code-identifiers-in-prose
+    description: Don't drop class/method/file/symbol names into prose when plain English works
+    detector: llm
+    parameters:
+      prompt: |
+        Does this message use code identifiers (class names, method names,
+        `Module.symbol` paths, file names with extensions, query parameter
+        keys, struct fields) inline in user-facing prose where a plain
+        English noun phrase would carry the same meaning?
+
+        Examples of violations:
+          - "App's CheckInURLAction.decide accepts the universal link..."
+            (could be: "the app accepts the universal link...")
+          - "Updated config.yaml to enable the new flag"
+            (could be: "Updated the config to enable the new flag")
+          - "The PaymentService.processRefund call returns..."
+            (could be: "The refund call returns...")
+
+        EXCEPTIONS — identifiers ARE appropriate when:
+          - The user is actively editing/debugging that exact symbol
+          - The user asked about that specific identifier by name
+          - The identifier is inside a code fence, not prose
+          - The identifier IS the subject of the change being reported
+            ("Renamed `foo` to `bar`")
+    severity: violation
+    rationale: |
+      Code identifiers in prose are jargon tax. They force the reader to
+      bridge from internal naming to the human concept on every reference.
+      When "the universal link" conveys the same information as
+      `CheckInURLAction.decide`, the prose should use the noun phrase. The
+      agent has the code in context; the user has the screen.

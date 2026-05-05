@@ -1,0 +1,76 @@
+# Transitional behavior rules — patches for current model behavior.
+#
+# Rules here exist because today's models exhibit a behavioral pattern
+# (often RLHF-induced over-caution) that fails user expectations. They
+# are EXPECTED to deprecate as models improve.
+
+rules:
+
+  - name: no-permission-asking-for-doable-work
+    description: Don't ask permission for work the agent has the tools to do
+    detector: llm
+    parameters:
+      prompt: |
+        Is this message asking the user permission to do work the agent
+        has the tools and context to do itself? Examples: "Want me to
+        search the repo?", "Should I read the file?", "Do you want me to
+        fix it?"
+        EXCEPTION: genuine ambiguity, irreversible actions (deploy to
+        production, delete data), or when the user explicitly opted into
+        confirmation.
+    severity: violation
+    on_violation: reject
+    guidance: |
+      If you have the tools and context to do the work, do it and report
+      back. If there's genuine ambiguity, state the ambiguity and your
+      proposed resolution — don't ask permission.
+    rationale: |
+      Current RLHF training induces excessive caution that asks permission
+      for trivial reversible work. Round-trips waste user attention and
+      shift cognitive load that should stay with the agent.
+    sunset_check: |
+      When models default to action-on-trivial without explicit prompting
+      (audit shows permission-asking pattern dropping below 5%),
+      deprecate.
+
+  - name: no-flag-when-fix-is-obvious
+    description: Don't flag problems you can fix yourself
+    detector: llm
+    parameters:
+      prompt: |
+        Does this message identify a problem ("X is broken", "Y is
+        missing") and stop, when the agent has the context and tools to
+        fix it within the scope of the current task?
+    severity: violation
+    on_violation: reject
+    guidance: |
+      If the fix is obvious and within scope, do it. If it's out of scope
+      or genuinely ambiguous, say WHY you're flagging instead of fixing.
+    rationale: |
+      Current models are trained toward conservative report-don't-act
+      behavior. Flagging problems the agent could fix transfers work to
+      the user.
+    sunset_check: |
+      When models default to fix-don't-flag for in-scope work,
+      deprecate.
+
+  - name: no-stop-mid-task-for-confirmation
+    description: Don't stop mid-task to confirm continuation
+    detector: llm
+    parameters:
+      prompt: |
+        Does this message ask "should I continue?" / "want me to keep
+        going?" / "ready for the next step?" in the middle of work the
+        user has already requested and authorized?
+    severity: violation
+    on_violation: reject
+    guidance: |
+      Continue the work. If something genuinely changed (irreversible
+      action coming, new ambiguity surfaced), say what changed and propose
+      a path forward — don't ask for blanket reauthorization.
+    rationale: |
+      Current models check in mid-task as a caution habit. Mid-task
+      confirmation requests double round-trips for the same work.
+    sunset_check: |
+      When models default to autonomous completion of authorized
+      multi-step work, deprecate.
