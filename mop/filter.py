@@ -1,15 +1,18 @@
 """MOP filter — evaluates a message against active rules.
 
-Entry point: `evaluate(text, rules_dir)` returns a `Verdict`.
+Entry point: `evaluate(text, config)` returns a `Verdict` — one of:
+  AcceptedVerdict        — no rule fired
+  RejectedVerdict        — rule fired, on_violation=reject; carries violations list
+  RewrittenVerdict       — rule fired, on_violation=edit; carries rewritten text once filled
 
 Detectors:
   - deterministic/regex: re.search against patterns list
   - deterministic/word_count: len(text.split()) > max
-  - llm: async call to a configurable LLM backend
+  - llm: pydantic-ai call to a configurable LLM backend
 
 LLM backend is configurable via MopConfig.llm_backend:
   - "stub": always returns Accept (default — zero dependency)
-  - "haiku": claude-haiku-4-5 via Anthropic SDK
+  - "haiku": claude-haiku-4-5 via pydantic-ai / Anthropic SDK
   - "gemma4": local ollama model (gemma4:e4b or gemma4:e2b)
 """
 
@@ -23,6 +26,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Literal
 
+from pydantic import BaseModel
+
 try:
     import yaml
 except ImportError:
@@ -32,6 +37,8 @@ logger = logging.getLogger(__name__)
 
 ACTIVE_RULES_DIR = Path(__file__).resolve().parent.parent / "rules" / "active"
 
+_HAIKU_MODEL = "claude-haiku-4-5-20251001"
+
 
 class Action(str, Enum):
     ACCEPT = "accept"
@@ -39,8 +46,12 @@ class Action(str, Enum):
     REJECT = "reject"
 
 
-@dataclass
-class Verdict:
+# ---------------------------------------------------------------------------
+# Verdict — three-case discriminated union
+# ---------------------------------------------------------------------------
+
+class Verdict(BaseModel):
+    """Base verdict. Concrete subclasses carry case-specific payloads."""
     action: Action
     rule: str | None = None
     reason: str | None = None
@@ -49,6 +60,24 @@ class Verdict:
     def __bool__(self) -> bool:
         return self.action == Action.ACCEPT
 
+
+class AcceptedVerdict(Verdict):
+    action: Literal[Action.ACCEPT] = Action.ACCEPT
+
+
+class RejectedVerdict(Verdict):
+    action: Literal[Action.REJECT] = Action.REJECT
+    violations: list[str] = []
+
+
+class RewrittenVerdict(Verdict):
+    action: Literal[Action.EDIT] = Action.EDIT
+    rewritten: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Config + internal rule type
+# ---------------------------------------------------------------------------
 
 @dataclass
 class MopConfig:
@@ -68,6 +97,10 @@ class _Rule:
     guidance: str
     source_file: str
 
+
+# ---------------------------------------------------------------------------
+# Rule loading
+# ---------------------------------------------------------------------------
 
 def _load_rules(rules_dir: Path) -> list[_Rule]:
     if yaml is None:
@@ -91,6 +124,10 @@ def _load_rules(rules_dir: Path) -> list[_Rule]:
     return rules
 
 
+# ---------------------------------------------------------------------------
+# Detectors
+# ---------------------------------------------------------------------------
+
 def _eval_deterministic(rule: _Rule, text: str) -> bool:
     params = rule.parameters
     dtype = params.get("type")
@@ -106,34 +143,52 @@ async def _eval_llm_stub(rule: _Rule, text: str) -> bool:
     return False
 
 
-async def _eval_llm_haiku(rule: _Rule, text: str) -> bool:
-    """One-shot eval via `claude -p`. Runs under Max plan — no API billing."""
-    import shutil
-    import subprocess
+class _EvalResult(BaseModel):
+    action: Literal["accept", "reject", "rewrite"]
+    reason: str | None = None
+    rewritten: str | None = None  # populated only when action="rewrite"
+
+
+_eval_agent = None
+
+
+def _get_eval_agent():
+    global _eval_agent
+    if _eval_agent is None:
+        from pydantic_ai import Agent
+        _eval_agent = Agent(_HAIKU_MODEL, result_type=_EvalResult)
+    return _eval_agent
+
+
+async def _eval_llm_haiku(rule: _Rule, text: str) -> _EvalResult:
+    """Classify and optionally rewrite via pydantic-ai + haiku. Billed to ANTHROPIC_API_KEY."""
     prompt = rule.parameters.get("prompt", "")
+    on_violation = rule.on_violation
     query = (
-        f"{prompt.strip()}\n\nMessage to evaluate:\n<message>\n{text}\n</message>\n\n"
-        "Reply with JSON only: {\"violation\": true} or {\"violation\": false}."
+        f"{prompt.strip()}\n\n"
+        f"On violation, the configured action is: '{on_violation}'.\n\n"
+        "Message to evaluate:\n<message>\n"
+        f"{text}\n</message>\n\n"
+        "Choose one of three actions:\n"
+        "- 'accept': the message does not violate the rule\n"
+        "- 'reject': the message violates the rule and on_violation='reject'\n"
+        "- 'rewrite': the message violates the rule and on_violation is not 'reject'; "
+        "provide a corrected version of the message in the 'rewritten' field\n\n"
+        "If action is 'rewrite', the 'rewritten' field must contain the full corrected text."
     )
-    cli = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
     try:
-        result = subprocess.run(
-            [cli, "-p", query, "--max-turns", "1"],
-            capture_output=True, text=True, timeout=30,
-        )
-        raw = result.stdout.strip()
-        return bool(json.loads(raw).get("violation"))
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception) as exc:
-        logger.warning("claude -p eval failed for rule %s: %s — defaulting to Accept", rule.name, exc)
-        return False
+        result = await _get_eval_agent().run(query)
+        return result.data
+    except Exception as exc:
+        logger.warning("haiku eval failed for rule %s: %s — defaulting to no violation", rule.name, exc)
+        return _EvalResult(action="accept", reason="eval error — defaulting to accept")
 
 
 async def _eval_llm_gemma4(rule: _Rule, text: str) -> bool:
     import urllib.request
     prompt = rule.parameters.get("prompt", "")
-    model = "gemma4:e4b"
     body = json.dumps({
-        "model": model,
+        "model": "gemma4:e4b",
         "prompt": (
             f"{prompt.strip()}\n\nMessage:\n{text}\n\n"
             "Reply with JSON only: {\"violation\": true} or {\"violation\": false}."
@@ -155,38 +210,95 @@ async def _eval_llm_gemma4(rule: _Rule, text: str) -> bool:
         return False
 
 
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
+
 async def evaluate(text: str, config: MopConfig | None = None) -> Verdict:
-    """Evaluate text against all active rules. Returns the first violation found, or Accept."""
+    """Evaluate text against all active rules. Returns the first violation, or AcceptedVerdict.
+
+    Empty text always returns RejectedVerdict regardless of rules.
+    """
+    if not text.strip():
+        return RejectedVerdict(
+            rule="empty-message",
+            violations=["empty-message"],
+            reason="Response was empty",
+            guidance=(
+                "Your response was empty. You must send at least one text message per turn. "
+                "Write a response and try again."
+            ),
+        )
+
     cfg = config or MopConfig()
     rules = _load_rules(cfg.rules_dir)
 
     for rule in rules:
-        fired = False
+        guidance = rule.guidance.strip() if rule.guidance else None
 
         if rule.detector == "deterministic":
             fired = _eval_deterministic(rule, text)
+            if fired:
+                if cfg.log_violations:
+                    logger.info("MOP violation: rule=%s on_violation=%s", rule.name, rule.on_violation)
+                reason = f"Rule '{rule.name}' fired"
+                if rule.on_violation == "reject":
+                    return RejectedVerdict(
+                        rule=rule.name,
+                        violations=[rule.name],
+                        reason=reason,
+                        guidance=guidance,
+                    )
+                else:
+                    return RewrittenVerdict(
+                        rule=rule.name,
+                        reason=reason,
+                        guidance=guidance,
+                    )
+
         elif rule.detector == "llm":
             if cfg.llm_backend == "haiku":
-                fired = await _eval_llm_haiku(rule, text)
-            elif cfg.llm_backend == "gemma4":
-                fired = await _eval_llm_gemma4(rule, text)
+                llm_result = await _eval_llm_haiku(rule, text)
+                if llm_result.action == "accept":
+                    continue
+                if cfg.log_violations:
+                    logger.info("MOP violation: rule=%s on_violation=%s", rule.name, rule.on_violation)
+                reason = llm_result.reason or f"Rule '{rule.name}' fired"
+                if llm_result.action == "reject":
+                    return RejectedVerdict(
+                        rule=rule.name,
+                        violations=[rule.name],
+                        reason=reason,
+                        guidance=guidance,
+                    )
+                else:  # rewrite
+                    return RewrittenVerdict(
+                        rule=rule.name,
+                        reason=reason,
+                        guidance=guidance,
+                        rewritten=llm_result.rewritten,
+                    )
             else:
-                fired = await _eval_llm_stub(rule, text)
+                if cfg.llm_backend == "gemma4":
+                    fired = await _eval_llm_gemma4(rule, text)
+                else:
+                    fired = await _eval_llm_stub(rule, text)
+                if fired:
+                    if cfg.log_violations:
+                        logger.info("MOP violation: rule=%s on_violation=%s", rule.name, rule.on_violation)
+                    reason = f"Rule '{rule.name}' fired"
+                    if rule.on_violation == "reject":
+                        return RejectedVerdict(
+                            rule=rule.name,
+                            violations=[rule.name],
+                            reason=reason,
+                            guidance=guidance,
+                        )
+                    else:
+                        return RewrittenVerdict(
+                            rule=rule.name,
+                            reason=reason,
+                            guidance=guidance,
+                        )
 
-        if fired:
-            action = Action.REJECT if rule.on_violation == "reject" else Action.EDIT
-            verdict = Verdict(
-                action=action,
-                rule=rule.name,
-                reason=f"Rule '{rule.name}' fired",
-                guidance=rule.guidance.strip() if rule.guidance else None,
-            )
-            if cfg.log_violations:
-                logger.info(
-                    "MOP violation: rule=%s action=%s",
-                    rule.name,
-                    action.value,
-                )
-            return verdict
-
-    return Verdict(action=Action.ACCEPT)
+    return AcceptedVerdict()
