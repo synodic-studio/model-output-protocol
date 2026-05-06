@@ -160,11 +160,39 @@ class _EvalResult(BaseModel):
 _eval_agent = None
 
 
+def _haiku_provider():
+    """Construct an AnthropicProvider with an explicit api_key.
+
+    Reads MOP_ANTHROPIC_API_KEY first (preferred — keeps the eval/rewrite
+    key isolated so it doesn't leak into spawned coding subprocesses via
+    inherited ANTHROPIC_API_KEY), falling back to ANTHROPIC_API_KEY for
+    backwards compatibility. Without this, pydantic-ai's default
+    AnthropicProvider reads ANTHROPIC_API_KEY from env, which forces
+    callers to export it process-wide — and any subprocess they spawn
+    (e.g. claude-code via the Claude Agent SDK) inherits and bills
+    against it.
+    """
+    import os
+
+    from pydantic_ai.providers.anthropic import AnthropicProvider
+
+    api_key = os.environ.get("MOP_ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "No API key for MOP haiku eval. Set MOP_ANTHROPIC_API_KEY "
+            "(preferred — kept out of spawned subprocesses) or ANTHROPIC_API_KEY."
+        )
+    return AnthropicProvider(api_key=api_key)
+
+
 def _get_eval_agent():
     global _eval_agent
     if _eval_agent is None:
         from pydantic_ai import Agent
-        _eval_agent = Agent(_HAIKU_MODEL, result_type=_EvalResult)
+        from pydantic_ai.models.anthropic import AnthropicModel
+
+        model = AnthropicModel(_HAIKU_MODEL, provider=_haiku_provider())
+        _eval_agent = Agent(model, output_type=_EvalResult)
     return _eval_agent
 
 
@@ -186,7 +214,7 @@ async def _eval_llm_haiku(rule: _Rule, text: str) -> _EvalResult:
     )
     try:
         result = await _get_eval_agent().run(query)
-        return result.data
+        return result.output
     except Exception as exc:
         logger.warning("haiku eval failed for rule %s: %s — defaulting to no violation", rule.name, exc)
         return _EvalResult(action="accept", reason="eval error — defaulting to accept")

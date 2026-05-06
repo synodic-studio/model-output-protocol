@@ -27,9 +27,16 @@ def _get_agent():
     global _agent
     if _agent is None:
         from pydantic_ai import Agent
+        from pydantic_ai.models.anthropic import AnthropicModel
 
+        from .filter import _haiku_provider
+
+        model = AnthropicModel(
+            "claude-haiku-4-5-20251001",
+            provider=_haiku_provider(),
+        )
         _agent = Agent(
-            "anthropic:claude-haiku-4-5-20251001",
+            model,
             output_type=TelegramMessage,
             system_prompt=(
                 "You are a message formatter for a Telegram chat interface. "
