@@ -73,6 +73,7 @@ class RejectedVerdict(Verdict):
 class RewrittenVerdict(Verdict):
     action: Literal[Action.EDIT] = Action.EDIT
     rewritten: str | None = None
+    violations: list[str] = []
 
 
 # ---------------------------------------------------------------------------
@@ -215,7 +216,12 @@ async def _eval_llm_gemma4(rule: _Rule, text: str) -> bool:
 # ---------------------------------------------------------------------------
 
 async def evaluate(text: str, config: MopConfig | None = None) -> Verdict:
-    """Evaluate text against all active rules. Returns the first violation, or AcceptedVerdict.
+    """Evaluate text against all active rules. Returns AcceptedVerdict if none fire.
+
+    Otherwise returns RejectedVerdict (if any rule rejects) carrying ALL rule
+    names that fired, OR RewrittenVerdict (if rules only rewrote) with the
+    final rewritten text and all rule names that fired. Rewrites are chained:
+    each rule evaluates the latest rewritten text.
 
     Empty text always returns RejectedVerdict regardless of rules.
     """
@@ -233,72 +239,62 @@ async def evaluate(text: str, config: MopConfig | None = None) -> Verdict:
     cfg = config or MopConfig()
     rules = _load_rules(cfg.rules_dir)
 
+    violations: list[str] = []
+    rejected_rules: list[str] = []
+    current_text = text
+    last_rewrite: str | None = None
+    last_guidance: str | None = None
+    last_reason: str | None = None
+
     for rule in rules:
         guidance = rule.guidance.strip() if rule.guidance else None
+        fired = False
+        rewritten_text: str | None = None
 
         if rule.detector == "deterministic":
-            fired = _eval_deterministic(rule, text)
-            if fired:
-                if cfg.log_violations:
-                    logger.info("MOP violation: rule=%s on_violation=%s", rule.name, rule.on_violation)
-                reason = f"Rule '{rule.name}' fired"
-                if rule.on_violation == "reject":
-                    return RejectedVerdict(
-                        rule=rule.name,
-                        violations=[rule.name],
-                        reason=reason,
-                        guidance=guidance,
-                    )
-                else:
-                    return RewrittenVerdict(
-                        rule=rule.name,
-                        reason=reason,
-                        guidance=guidance,
-                    )
-
+            fired = _eval_deterministic(rule, current_text)
         elif rule.detector == "llm":
             if cfg.llm_backend == "haiku":
-                llm_result = await _eval_llm_haiku(rule, text)
-                if llm_result.action == "accept":
-                    continue
-                if cfg.log_violations:
-                    logger.info("MOP violation: rule=%s on_violation=%s", rule.name, rule.on_violation)
-                reason = llm_result.reason or f"Rule '{rule.name}' fired"
-                if llm_result.action == "reject":
-                    return RejectedVerdict(
-                        rule=rule.name,
-                        violations=[rule.name],
-                        reason=reason,
-                        guidance=guidance,
-                    )
-                else:  # rewrite
-                    return RewrittenVerdict(
-                        rule=rule.name,
-                        reason=reason,
-                        guidance=guidance,
-                        rewritten=llm_result.rewritten,
-                    )
+                llm_result = await _eval_llm_haiku(rule, current_text)
+                if llm_result.action != "accept":
+                    fired = True
+                    if llm_result.action == "rewrite":
+                        rewritten_text = llm_result.rewritten
+            elif cfg.llm_backend == "gemma4":
+                fired = await _eval_llm_gemma4(rule, current_text)
             else:
-                if cfg.llm_backend == "gemma4":
-                    fired = await _eval_llm_gemma4(rule, text)
-                else:
-                    fired = await _eval_llm_stub(rule, text)
-                if fired:
-                    if cfg.log_violations:
-                        logger.info("MOP violation: rule=%s on_violation=%s", rule.name, rule.on_violation)
-                    reason = f"Rule '{rule.name}' fired"
-                    if rule.on_violation == "reject":
-                        return RejectedVerdict(
-                            rule=rule.name,
-                            violations=[rule.name],
-                            reason=reason,
-                            guidance=guidance,
-                        )
-                    else:
-                        return RewrittenVerdict(
-                            rule=rule.name,
-                            reason=reason,
-                            guidance=guidance,
-                        )
+                fired = await _eval_llm_stub(rule, current_text)
 
-    return AcceptedVerdict()
+        if not fired:
+            continue
+
+        if cfg.log_violations:
+            logger.info("MOP violation: rule=%s on_violation=%s", rule.name, rule.on_violation)
+        violations.append(rule.name)
+        last_guidance = guidance
+        last_reason = f"Rule '{rule.name}' fired"
+
+        if rule.on_violation == "reject":
+            rejected_rules.append(rule.name)
+        elif rewritten_text is not None:
+            last_rewrite = rewritten_text
+            current_text = rewritten_text
+
+    if not violations:
+        return AcceptedVerdict()
+
+    if rejected_rules:
+        return RejectedVerdict(
+            rule=rejected_rules[-1],
+            violations=violations,
+            reason=last_reason,
+            guidance=last_guidance,
+        )
+
+    return RewrittenVerdict(
+        rule=violations[-1],
+        violations=violations,
+        rewritten=last_rewrite,
+        reason=last_reason,
+        guidance=last_guidance,
+    )

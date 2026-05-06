@@ -7,10 +7,12 @@ URL:   http://bajor:7731  (Tailscale)
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from fastapi import FastAPI, HTTPException
@@ -32,6 +34,74 @@ app = FastAPI(title="MOP Studio")
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _parse_rule(r: dict) -> dict:
+    params = r.get("parameters", {})
+    det_type = params.get("type", "regex")
+    return {
+        "name": r.get("name", ""),
+        "description": r.get("description", ""),
+        "detector": r.get("detector", "llm"),
+        "severity": r.get("severity", "violation"),
+        "on_violation": r.get("on_violation", "reject"),
+        "guidance": (r.get("guidance") or "").strip(),
+        "rationale": (r.get("rationale") or "").strip(),
+        "llm_prompt": (params.get("prompt") or "").strip() if r.get("detector") == "llm" else "",
+        "det_type": det_type,
+        "det_patterns": params.get("patterns", []),
+        "det_max_words": params.get("max"),
+    }
+
+
+def _rule_to_yaml_dict(rule: dict) -> dict:
+    r: dict = {
+        "name": rule["name"],
+        "detector": rule["detector"],
+        "severity": rule["severity"],
+        "on_violation": rule["on_violation"],
+    }
+    if rule.get("description"):
+        r["description"] = rule["description"]
+    if rule["detector"] == "llm":
+        r["parameters"] = {"prompt": rule.get("llm_prompt", "")}
+    elif rule["detector"] == "deterministic":
+        det: dict = {"type": rule.get("det_type", "regex")}
+        if rule.get("det_type") == "word_count":
+            det["max"] = rule.get("det_max_words") or 200
+        else:
+            det["patterns"] = rule.get("det_patterns") or []
+        r["parameters"] = det
+    if rule.get("guidance"):
+        r["guidance"] = rule["guidance"]
+    if rule.get("rationale"):
+        r["rationale"] = rule["rationale"]
+    return r
+
+
+def _load_files():
+    files = []
+    for status, dirpath in [("active", RULES_ACTIVE), ("pending", RULES_PENDING)]:
+        if not dirpath.exists():
+            continue
+        for path in sorted(dirpath.rglob("*.yml")):
+            content = path.read_text()
+            try:
+                data = yaml.safe_load(content) or {}
+                parsed_rules = [_parse_rule(r) for r in data.get("rules", [])]
+            except Exception:
+                parsed_rules = []
+            files.append({
+                "path": str(path.relative_to(REPO_ROOT)),
+                "status": status,
+                "filename": path.name,
+                "rules": parsed_rules,
+            })
+    return files
+
+
+# ---------------------------------------------------------------------------
 # Request models
 # ---------------------------------------------------------------------------
 
@@ -40,13 +110,19 @@ class EvalRequest(BaseModel):
     backend: str = "haiku"
 
 
-class SaveRequest(BaseModel):
-    path: str
-    content: str
-
-
 class ToggleRequest(BaseModel):
     path: str
+
+
+class SaveRuleRequest(BaseModel):
+    file_path: str
+    original_name: str
+    rule: dict
+
+
+class AddRuleRequest(BaseModel):
+    file_path: str
+    rule: dict
 
 
 class FeedbackRequest(BaseModel):
@@ -90,39 +166,7 @@ async def api_evaluate(req: EvalRequest):
 
 @app.get("/api/rules")
 def api_rules():
-    files = []
-    for status, dirpath in [("active", RULES_ACTIVE), ("pending", RULES_PENDING)]:
-        if not dirpath.exists():
-            continue
-        for path in sorted(dirpath.rglob("*.yml")):
-            content = path.read_text()
-            try:
-                data = yaml.safe_load(content) or {}
-                rule_names = [r.get("name", "?") for r in data.get("rules", [])]
-            except Exception:
-                rule_names = []
-            files.append({
-                "path": str(path.relative_to(REPO_ROOT)),
-                "status": status,
-                "filename": path.name,
-                "rule_names": rule_names,
-                "content": content,
-            })
-    return JSONResponse(files)
-
-
-@app.post("/api/rules/save")
-def api_save(req: SaveRequest):
-    path = REPO_ROOT / req.path
-    path.resolve().relative_to(REPO_ROOT.resolve())  # safety check
-    if path.suffix != ".yml":
-        raise HTTPException(400, "Only .yml files")
-    try:
-        yaml.safe_load(req.content)
-    except yaml.YAMLError as e:
-        raise HTTPException(400, f"Invalid YAML: {e}")
-    path.write_text(req.content)
-    return JSONResponse({"ok": True})
+    return JSONResponse(_load_files())
 
 
 @app.post("/api/rules/toggle")
@@ -131,16 +175,55 @@ def api_toggle(req: ToggleRequest):
     path.resolve().relative_to(REPO_ROOT.resolve())
     if not path.exists():
         raise HTTPException(404, "File not found")
-    if RULES_ACTIVE in path.resolve().parents or path.resolve().parent == RULES_ACTIVE:
-        dest_dir = RULES_PENDING
-        new_status = "pending"
+    if path.resolve().parent == RULES_ACTIVE.resolve():
+        dest_dir, new_status = RULES_PENDING, "pending"
     else:
-        dest_dir = RULES_ACTIVE
-        new_status = "active"
+        dest_dir, new_status = RULES_ACTIVE, "active"
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / path.name
     path.rename(dest)
     return JSONResponse({"new_status": new_status, "new_path": str(dest.relative_to(REPO_ROOT))})
+
+
+@app.post("/api/rules/save-rule")
+def api_save_rule(req: SaveRuleRequest):
+    path = REPO_ROOT / req.file_path
+    path.resolve().relative_to(REPO_ROOT.resolve())
+    if path.suffix != ".yml":
+        raise HTTPException(400, "Only .yml files")
+    data = yaml.safe_load(path.read_text()) if path.exists() else {}
+    data = data or {}
+    rules = data.get("rules", [])
+    new_dict = _rule_to_yaml_dict(req.rule)
+    for i, r in enumerate(rules):
+        if r.get("name") == req.original_name:
+            rules[i] = new_dict
+            break
+    else:
+        rules.append(new_dict)
+    data["rules"] = rules
+    path.write_text(
+        yaml.dump(data, allow_unicode=True, default_flow_style=False, sort_keys=False, indent=2)
+    )
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/rules/add-rule")
+def api_add_rule(req: AddRuleRequest):
+    path = REPO_ROOT / req.file_path
+    path.resolve().relative_to(REPO_ROOT.resolve())
+    data = yaml.safe_load(path.read_text()) if path.exists() else {}
+    data = data or {}
+    rules = data.get("rules", [])
+    if any(r.get("name") == req.rule.get("name") for r in rules):
+        raise HTTPException(409, f"Rule {req.rule.get('name')!r} already exists in this file")
+    rules.append(_rule_to_yaml_dict(req.rule))
+    data["rules"] = rules
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        yaml.dump(data, allow_unicode=True, default_flow_style=False, sort_keys=False, indent=2)
+    )
+    return JSONResponse({"ok": True})
 
 
 @app.get("/api/evals")
@@ -152,12 +235,12 @@ def api_evals():
         [sys.executable, str(harness), "--json"],
         capture_output=True, text=True, timeout=120,
         cwd=str(EVALS_DIR),
-        env={**__import__("os").environ, "PYTHONPATH": str(REPO_ROOT)},
+        env={**os.environ, "PYTHONPATH": str(REPO_ROOT)},
     )
     try:
         return JSONResponse(json.loads(r.stdout))
     except json.JSONDecodeError:
-        return JSONResponse({"error": r.stderr or r.stdout or "Harness produced no output"})
+        return JSONResponse({"error": r.stderr or r.stdout or "No output"})
 
 
 @app.post("/api/evals/add-example")
@@ -188,7 +271,7 @@ def api_violations():
     for line in reversed(lines[-100:]):
         try:
             e = json.loads(line)
-            if e.get("text_preview"):  # skip empty-message entries from tests
+            if e.get("text_preview", "").strip():
                 entries.append(e)
         except json.JSONDecodeError:
             pass
@@ -207,278 +290,180 @@ def api_feedback(req: FeedbackRequest):
 # HTML
 # ---------------------------------------------------------------------------
 
-_MERMAID = """
-graph LR
-    T([📱 Telegram]) -->|message| PB[Patchbay Bridge]
-    PB --> HS{{Harness}}
-    HS -->|cc-sdk-mop| MOP[MOP Harness]
-    HS -->|cc-sdk / cc-cli / pi| DIRECT[Direct Harness]
-    MOP --> INNER[cc-sdk inner]
-    INNER --> CC[Claude Code]
-    CC --> BUF[Buffer events]
-    BUF --> EVAL{{evaluate}}
-    EVAL -->|ACCEPT| DEL([✅ Deliver])
-    EVAL -->|REJECT| GUIDE[Inject guidance + retry]
-    EVAL -->|EDIT| REW[pydantic-ai rewrite]
-    REW --> DEL
-    GUIDE -->|attempt < max_retries| INNER
-    GUIDE -->|exhausted| DEL
-    RULES[(rules/active)] -.->|loaded| EVAL
-    VLOG[(violations.jsonl)] -.->|appended| EVAL
-    DIRECT --> DEL
-    DEL --> T
-"""
-
-HTML = """<!DOCTYPE html>
+HTML = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MOP Studio</title>
 <script src="https://cdn.tailwindcss.com"></script>
-<script src="https://unpkg.com/alpinejs@3.14.3/dist/cdn.min.js" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
 <style>
-  [x-cloak]{display:none!important}
-  textarea{font-family:ui-monospace,monospace}
-  .tab-btn{padding:6px 14px;border-radius:6px;font-size:.8rem;font-weight:500;cursor:pointer;transition:background .15s,color .15s}
-  .tab-active{background:#4f46e5;color:#fff}
-  .tab-inactive{color:#9ca3af}
-  .tab-inactive:hover{color:#e5e7eb;background:#374151}
-  .verdict-accept{background:#052e16;border-color:#166534}
-  .verdict-reject{background:#2d0b0b;border-color:#7f1d1d}
-  .verdict-edit{background:#1c1400;border-color:#713f12}
-  .toggle-track{position:relative;display:inline-block;width:36px;height:20px;border-radius:9999px;cursor:pointer;transition:background .2s}
-  .toggle-thumb{position:absolute;top:2px;width:16px;height:16px;border-radius:9999px;background:#fff;transition:left .2s}
+body{font-family:system-ui,sans-serif;background:#030712;color:#f9fafb;min-height:100vh}
+textarea,input,select{font-family:ui-monospace,monospace;font-size:.8rem}
+.tab-panel{display:none}.tab-panel.active{display:block}
+.tab-btn{padding:5px 13px;border-radius:6px;font-size:.8rem;font-weight:500;cursor:pointer;color:#9ca3af;background:transparent;border:none}
+.tab-btn:hover{color:#e5e7eb;background:#374151}
+.tab-btn.active{background:#4f46e5;color:#fff}
+.card{background:#111827;border:1px solid #1f2937;border-radius:8px;overflow:hidden;margin-bottom:10px}
+.card.active-rule{border-color:#14532d}
+.card-header{display:flex;align-items:center;gap:12px;padding:10px 14px}
+.card-body{border-top:1px solid #1f2937;padding:14px;display:none}
+.card-body.open{display:block}
+.field{margin-bottom:12px}
+.field label{display:block;font-size:.7rem;color:#9ca3af;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em}
+.field input[type=text],.field textarea,.field select{width:100%;background:#0f172a;border:1px solid #374151;border-radius:5px;padding:6px 8px;color:#f9fafb;box-sizing:border-box}
+.field input[type=text]:focus,.field textarea:focus,.field select:focus{outline:none;border-color:#6366f1}
+.field-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px}
+.field-row-2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.toggle-wrap{display:flex;align-items:center;cursor:pointer}
+.toggle-wrap input{display:none}
+.toggle-track{width:36px;height:20px;border-radius:9999px;background:#374151;position:relative;transition:background .2s;flex-shrink:0}
+.toggle-wrap input:checked+.toggle-track{background:#166534}
+.toggle-thumb{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:9999px;background:#fff;transition:left .2s}
+.toggle-wrap input:checked+.toggle-track .toggle-thumb{left:18px}
+.verdict{border-radius:6px;border:1px solid;padding:14px;margin-top:12px}
+.verdict.accept{background:#052e16;border-color:#166534}
+.verdict.reject{background:#2d0b0b;border-color:#7f1d1d}
+.verdict.edit{background:#1c1400;border-color:#713f12}
+.tag-accept{color:#4ade80;font-weight:700;font-size:.8rem;text-transform:uppercase}
+.tag-reject{color:#f87171;font-weight:700;font-size:.8rem;text-transform:uppercase}
+.tag-edit{color:#fbbf24;font-weight:700;font-size:.8rem;text-transform:uppercase}
+.badge-active{background:#052e16;color:#4ade80;font-size:.65rem;padding:2px 7px;border-radius:3px;font-family:monospace}
+.badge-pending{background:#1f2937;color:#6b7280;font-size:.65rem;padding:2px 7px;border-radius:3px;font-family:monospace}
+.stat{background:#1f2937;border-radius:6px;padding:12px;text-align:center}
+.mismatch-row{background:#2d0b0b;border:1px solid #7f1d1d;border-radius:4px;padding:6px 10px;font-size:.75rem;margin-bottom:4px}
+.btn{padding:5px 14px;border-radius:5px;font-size:.8rem;font-weight:500;cursor:pointer;border:none}
+.btn-primary{background:#4f46e5;color:#fff}.btn-primary:hover{background:#4338ca}.btn-primary:disabled{opacity:.4;cursor:default}
+.btn-ghost{background:transparent;color:#9ca3af}.btn-ghost:hover{color:#e5e7eb}
+.btn-danger{background:#7f1d1d;color:#fca5a5}.btn-danger:hover{background:#991b1b}
+select{background:#0f172a;border:1px solid #374151;border-radius:4px;padding:4px 8px;color:#f9fafb}
+.det-llm{}.det-det{}
+.mermaid svg{max-width:100%}
 </style>
 </head>
-<body class="bg-gray-950 text-gray-100 min-h-screen" x-data="mopApp()" x-cloak>
+<body>
 
-<header class="bg-gray-900 border-b border-gray-800 px-5 py-3 flex items-center gap-4 sticky top-0 z-10">
-  <span class="font-bold text-base tracking-tight">MOP Studio</span>
-  <div class="flex gap-1">
-    <template x-for="t in ['playground','rules','evals','diagram']" :key="t">
-      <button @click="tab=t" class="tab-btn" :class="tab===t?'tab-active':'tab-inactive'" x-text="t"></button>
-    </template>
+<header style="background:#111827;border-bottom:1px solid #1f2937;padding:10px 20px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:10">
+  <span style="font-weight:700;font-size:.95rem">MOP Studio</span>
+  <div style="display:flex;gap:4px">
+    <button class="tab-btn active" onclick="switchTab('playground')">playground</button>
+    <button class="tab-btn" onclick="switchTab('rules')">rules</button>
+    <button class="tab-btn" onclick="switchTab('evals')">evals</button>
+    <button class="tab-btn" onclick="switchTab('diagram')">diagram</button>
   </div>
-  <div class="ml-auto text-xs text-gray-600">model-output-protocol · bajor:7731</div>
+  <div style="margin-left:auto;font-size:.7rem;color:#6b7280">bajor:7731</div>
 </header>
 
-<main class="max-w-4xl mx-auto px-4 py-5 space-y-4">
+<main style="max-width:900px;margin:0 auto;padding:20px 16px">
 
   <!-- PLAYGROUND -->
-  <div x-show="tab==='playground'" class="space-y-4">
-    <div class="flex items-center gap-3 flex-wrap">
-      <h2 class="text-base font-semibold">Playground</h2>
-      <select x-model="backend" class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs">
-        <option value="stub">stub (always accept)</option>
-        <option value="haiku">haiku (live LLM)</option>
+  <div id="panel-playground" class="tab-panel active">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+      <span style="font-weight:600">Playground</span>
+      <select id="pg-backend">
+        <option value="stub">stub (always accept, free)</option>
+        <option value="haiku" selected>haiku (Max plan, free)</option>
       </select>
-      <button @click="loadViolations()" class="text-xs text-indigo-400 hover:text-indigo-300 underline">
-        load recent violation
-      </button>
+      <button class="btn btn-ghost" onclick="loadViolations()">↑ load recent violation</button>
     </div>
-
-    <textarea x-model="playText" rows="8"
-      class="w-full bg-gray-800 border border-gray-700 rounded p-3 text-sm focus:outline-none focus:border-indigo-500 resize-y"
-      placeholder="Paste a Claude response to test against active rules…"></textarea>
-
-    <div class="flex gap-2 items-center">
-      <button @click="runEval()" :disabled="evalLoading"
-        class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 px-4 py-1.5 rounded text-sm font-medium">
-        <span x-show="!evalLoading">Run evaluate()</span>
-        <span x-show="evalLoading">Running…</span>
-      </button>
-      <button @click="playText='';verdict=null" class="text-gray-500 hover:text-gray-300 text-xs px-2">Clear</button>
+    <textarea id="pg-text" rows="8" style="width:100%;background:#1f2937;border:1px solid #374151;border-radius:6px;padding:10px;color:#f9fafb;resize:vertical;box-sizing:border-box" placeholder="Paste a Claude response to test against active rules…"></textarea>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+      <button class="btn btn-primary" id="pg-run-btn" onclick="runEval()">Run evaluate()</button>
+      <button class="btn btn-ghost" onclick="document.getElementById('pg-text').value='';document.getElementById('pg-result').style.display='none'">Clear</button>
     </div>
-
-    <div x-show="verdict" class="border rounded p-4 space-y-2"
-      :class="verdict?.action==='accept'?'verdict-accept border-green-800':verdict?.action==='reject'?'verdict-reject border-red-800':'verdict-edit border-yellow-800'">
-      <div class="flex items-center gap-2">
-        <span class="font-bold text-sm uppercase tracking-wide"
-          :class="verdict?.action==='accept'?'text-green-400':verdict?.action==='reject'?'text-red-400':'text-yellow-400'"
-          x-text="verdict?.action"></span>
-        <span x-show="verdict?.rule" class="text-xs font-mono text-gray-400" x-text="verdict?.rule"></span>
+    <div id="pg-result" class="verdict" style="display:none">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <span id="pg-action"></span>
+        <span id="pg-rule" style="font-size:.75rem;color:#9ca3af;font-family:monospace"></span>
       </div>
-      <p x-show="verdict?.guidance" class="text-sm text-gray-300" x-text="verdict?.guidance"></p>
-      <div x-show="verdict?.rewritten" class="mt-3 pt-3 border-t border-gray-700">
-        <div class="text-xs text-yellow-500 mb-1">Rewritten (EDIT):</div>
-        <p class="text-sm bg-gray-900 rounded p-3 whitespace-pre-wrap" x-text="verdict?.rewritten"></p>
+      <p id="pg-guidance" style="font-size:.85rem;color:#d1d5db;margin:0"></p>
+      <div id="pg-rewrite-wrap" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid #374151">
+        <div style="font-size:.7rem;color:#fbbf24;margin-bottom:4px">Rewritten (EDIT):</div>
+        <pre id="pg-rewrite" style="font-size:.8rem;background:#0f172a;border-radius:4px;padding:10px;white-space:pre-wrap;margin:0;color:#f9fafb"></pre>
       </div>
     </div>
-
-    <!-- Violations list -->
-    <div x-show="violations.length>0" class="space-y-1">
-      <div class="text-xs text-gray-500 mb-1">Click to load into playground:</div>
-      <div class="max-h-56 overflow-y-auto space-y-1">
-        <template x-for="(v,i) in violations" :key="i">
-          <button @click="playText=v.text_preview;violations=[]"
-            class="w-full text-left text-xs bg-gray-800 hover:bg-gray-700 rounded px-3 py-2 flex items-center gap-2">
-            <span class="text-red-400 font-mono shrink-0" x-text="v.rule"></span>
-            <span class="text-gray-400 truncate" x-text="v.text_preview"></span>
-          </button>
-        </template>
-      </div>
+    <div id="pg-violations" style="display:none;margin-top:12px">
+      <div style="font-size:.7rem;color:#6b7280;margin-bottom:6px">Click to load:</div>
+      <div id="pg-vlist" style="max-height:200px;overflow-y:auto"></div>
     </div>
   </div>
 
   <!-- RULES -->
-  <div x-show="tab==='rules'" class="space-y-3">
-    <div class="flex items-center gap-3">
-      <h2 class="text-base font-semibold">Rules</h2>
-      <span class="text-xs text-gray-500">Toggle = move active ↔ pending · Edit = save YAML to disk</span>
-      <button @click="loadRules()" class="ml-auto text-xs text-indigo-400 hover:text-indigo-300">↻ refresh</button>
+  <div id="panel-rules" class="tab-panel">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">
+      <span style="font-weight:600">Rules</span>
+      <span style="font-size:.75rem;color:#6b7280">Toggle = active ↔ pending</span>
+      <button class="btn btn-ghost" style="margin-left:auto" onclick="loadRules()">↻ refresh</button>
     </div>
-
-    <div x-show="rulesLoading" class="text-gray-500 text-sm">Loading…</div>
-
-    <template x-for="rule in rules" :key="rule.path">
-      <div class="bg-gray-900 border rounded overflow-hidden"
-        :class="rule.status==='active'?'border-green-900':'border-gray-800'">
-        <div class="flex items-center gap-3 px-4 py-3">
-
-          <!-- Toggle -->
-          <div @click="toggleRule(rule)" class="toggle-track flex-shrink-0"
-            :style="rule.status==='active'?'background:#166534':'background:#374151'">
-            <div class="toggle-thumb" :style="rule.status==='active'?'left:18px':'left:2px'"></div>
-          </div>
-
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2">
-              <span class="font-mono text-sm" x-text="rule.filename"></span>
-              <span class="text-xs px-1.5 py-0.5 rounded font-mono"
-                :class="rule.status==='active'?'bg-green-950 text-green-400':'bg-gray-800 text-gray-500'"
-                x-text="rule.status"></span>
-            </div>
-            <div class="text-xs text-gray-500 mt-0.5 font-mono" x-text="rule.rule_names.join(' · ')"></div>
-          </div>
-
-          <button @click="rule._exp=!rule._exp; if(rule._exp) rule._edit=rule.content"
-            class="text-xs text-gray-500 hover:text-gray-200 px-2 py-1 rounded hover:bg-gray-700"
-            x-text="rule._exp?'collapse':'edit'"></button>
-        </div>
-
-        <div x-show="rule._exp" class="border-t border-gray-800 px-4 py-3">
-          <textarea x-model="rule._edit" rows="18"
-            class="w-full bg-gray-800 border border-gray-700 rounded p-2 text-xs focus:outline-none focus:border-indigo-500"></textarea>
-          <div class="flex items-center gap-2 mt-2">
-            <button @click="saveRule(rule)" :disabled="rule._saving"
-              class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 px-3 py-1 rounded text-xs"
-              x-text="rule._saving?'Saving…':'Save'"></button>
-            <button @click="rule._exp=false;rule._edit=rule.content"
-              class="text-gray-500 hover:text-gray-300 text-xs px-2">Cancel</button>
-            <span x-show="rule._savedOk" class="text-green-400 text-xs">✓ Saved</span>
-            <span x-show="rule._err" class="text-red-400 text-xs" x-text="rule._err"></span>
-            <span class="ml-auto text-xs text-gray-700 font-mono" x-text="rule.path"></span>
-          </div>
-        </div>
-      </div>
-    </template>
+    <div id="rules-loading" style="color:#6b7280;font-size:.85rem;display:none">Loading…</div>
+    <div id="rules-list"></div>
   </div>
 
   <!-- EVALS -->
-  <div x-show="tab==='evals'" class="space-y-4">
-    <div class="flex items-center gap-3">
-      <h2 class="text-base font-semibold">Evals</h2>
-      <button @click="runEvals()" :disabled="evalsLoading"
-        class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 px-3 py-1.5 rounded text-sm">
-        <span x-show="!evalsLoading">Run harness</span>
-        <span x-show="evalsLoading">Running…</span>
-      </button>
-      <span class="text-xs text-gray-500">deterministic rules only · LLM rules skipped</span>
+  <div id="panel-evals" class="tab-panel">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">
+      <span style="font-weight:600">Evals</span>
+      <button class="btn btn-primary" id="evals-run-btn" onclick="runEvals()">Run harness</button>
+      <span style="font-size:.75rem;color:#6b7280">deterministic only · LLM rules skipped</span>
     </div>
-
-    <div x-show="evalsData" class="space-y-4">
-      <div class="grid grid-cols-4 gap-3">
-        <template x-for="[label, key, color] in [['Correct','correct','text-green-400'],['Mismatches','mismatches','text-red-400'],['Examples','examples','text-gray-300'],['LLM skipped','rules_llm_skipped','text-yellow-400']]" :key="key">
-          <div class="bg-gray-800 rounded p-3 text-center">
-            <div class="text-2xl font-bold" :class="color" x-text="evalsData?.summary?.[key]??0"></div>
-            <div class="text-xs text-gray-500 mt-1" x-text="label"></div>
-          </div>
-        </template>
+    <div id="evals-result" style="display:none;margin-bottom:16px"></div>
+    <div class="card" style="padding:16px">
+      <div style="font-size:.85rem;font-weight:500;margin-bottom:12px">Add counterexample</div>
+      <div class="field-row">
+        <div class="field"><label>ID (kebab-case)</label><input type="text" id="ex-id" placeholder="my-example"></div>
+        <div class="field"><label>Category</label><select id="ex-cat" style="width:100%"><option>behavior</option><option>voice</option></select></div>
+        <div class="field"><label>Source</label><select id="ex-src" style="width:100%"><option value="real-sanitized">real-sanitized</option><option value="synthetic">synthetic</option></select></div>
       </div>
-
-      <div x-show="evalsData?.mismatches?.length>0" class="space-y-1">
-        <div class="text-xs text-red-400 font-medium">Mismatches:</div>
-        <template x-for="m in evalsData?.mismatches||[]" :key="m.example+m.rule">
-          <div class="bg-red-950 border border-red-900 rounded px-3 py-2 text-xs flex gap-2 items-center">
-            <span class="text-red-400 font-mono" x-text="m.type"></span>
-            <span class="text-gray-300" x-text="m.rule+' vs '+m.example"></span>
-            <span class="ml-auto text-gray-600 font-mono" x-text="m.file"></span>
-          </div>
-        </template>
+      <div class="field"><label>Text</label><textarea id="ex-text" rows="4" style="width:100%;background:#0f172a;border:1px solid #374151;border-radius:5px;padding:8px;color:#f9fafb;box-sizing:border-box" placeholder="The message to classify…"></textarea></div>
+      <div class="field-row-2">
+        <div class="field"><label>Expected violations (one per line)</label><textarea id="ex-violations" rows="3" style="width:100%;background:#0f172a;border:1px solid #374151;border-radius:5px;padding:6px;color:#f9fafb;box-sizing:border-box" placeholder="no-permission-asking-for-doable-work"></textarea></div>
+        <div class="field"><label>Expected clean (one per line)</label><textarea id="ex-clean" rows="3" style="width:100%;background:#0f172a;border:1px solid #374151;border-radius:5px;padding:6px;color:#f9fafb;box-sizing:border-box"></textarea></div>
       </div>
-
-      <div x-show="(evalsData?.summary?.mismatches??1)===0" class="text-green-400 text-sm">✓ All deterministic evals pass</div>
-      <div x-show="evalsData?.error" class="text-red-400 text-sm" x-text="evalsData?.error"></div>
-    </div>
-
-    <!-- Add example -->
-    <div class="bg-gray-900 border border-gray-800 rounded p-4 space-y-3">
-      <div class="text-sm font-medium text-gray-300">Add counterexample</div>
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label class="text-xs text-gray-500 block mb-1">ID (kebab-case)</label>
-          <input x-model="newEx.id" class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs focus:outline-none focus:border-indigo-500" placeholder="my-example">
-        </div>
-        <div>
-          <label class="text-xs text-gray-500 block mb-1">Category</label>
-          <select x-model="newEx.category" class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs">
-            <option>behavior</option>
-            <option>voice</option>
-          </select>
-        </div>
-      </div>
-      <div>
-        <label class="text-xs text-gray-500 block mb-1">Text</label>
-        <textarea x-model="newEx.text" rows="4" class="w-full bg-gray-800 border border-gray-700 rounded p-2 text-xs focus:outline-none focus:border-indigo-500" placeholder="The message to classify…"></textarea>
-      </div>
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label class="text-xs text-gray-500 block mb-1">Expected violations (one per line)</label>
-          <textarea x-model="newEx.violations" rows="3" class="w-full bg-gray-800 border border-gray-700 rounded p-2 text-xs focus:outline-none focus:border-indigo-500" placeholder="no-permission-asking-for-doable-work"></textarea>
-        </div>
-        <div>
-          <label class="text-xs text-gray-500 block mb-1">Expected clean (one per line)</label>
-          <textarea x-model="newEx.clean" rows="3" class="w-full bg-gray-800 border border-gray-700 rounded p-2 text-xs focus:outline-none focus:border-indigo-500"></textarea>
-        </div>
-      </div>
-      <div>
-        <label class="text-xs text-gray-500 block mb-1">Rationale</label>
-        <input x-model="newEx.rationale" class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs focus:outline-none focus:border-indigo-500">
-      </div>
-      <div class="flex gap-2 items-center">
-        <button @click="addExample()" :disabled="newEx.saving"
-          class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 px-3 py-1 rounded text-xs"
-          x-text="newEx.saving?'Saving…':'Add example'"></button>
-        <span x-show="newEx.ok" class="text-green-400 text-xs">✓ Added</span>
-        <span x-show="newEx.err" class="text-red-400 text-xs" x-text="newEx.err"></span>
+      <div class="field"><label>Rationale</label><input type="text" id="ex-rationale"></div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button class="btn btn-primary" onclick="addExample()">Add example</button>
+        <span id="ex-status" style="font-size:.75rem"></span>
       </div>
     </div>
   </div>
 
   <!-- DIAGRAM -->
-  <div x-show="tab==='diagram'" class="space-y-4">
-    <div class="flex items-center gap-3">
-      <h2 class="text-base font-semibold">System Diagram</h2>
-      <span class="text-xs text-gray-500">MOP pipeline architecture</span>
+  <div id="panel-diagram" class="tab-panel">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+      <span style="font-weight:600">System Diagram</span>
     </div>
-
-    <div class="bg-gray-900 border border-gray-800 rounded p-4 overflow-x-auto">
-      <div class="mermaid" id="mermaid-diagram">""" + _MERMAID + """</div>
+    <div class="card" style="padding:16px;overflow-x:auto;margin-bottom:14px">
+      <div id="mermaid-container">
+        <div class="mermaid">
+flowchart TD
+    CC[Claude Code response text] --> EV["evaluate(text)"]
+    RULES[(rules/active/*.yml)] -.->|loaded| EV
+    EV --> LOOP{For each rule}
+    LOOP -->|deterministic| DET[regex / word_count]
+    LOOP -->|llm| HAIKU["Haiku call: accept | reject | rewrite"]
+    DET --> COLLECT[Collect violations]
+    HAIKU --> COLLECT
+    COLLECT --> NEXT{More rules?}
+    NEXT -->|yes, chain rewrites| LOOP
+    NEXT -->|no| FINAL{Any violation?}
+    FINAL -->|none| ACC[AcceptedVerdict]
+    FINAL -->|any reject| REJ["RejectedVerdict<br/>violations: list of all rule names"]
+    FINAL -->|only rewrites| REW["RewrittenVerdict<br/>rewritten: final text<br/>violations: rule names"]
+    ACC --> DELIVER([Deliver original to user])
+    REW --> DELIVER2([Deliver rewritten to user])
+    REJ --> RETRY[Retry: inject guidance, agent tries again]
+    RETRY -.->|future| JUSTIFY["justify(reason) — agent contests rejection<br/>not yet implemented"]
+        </div>
+      </div>
     </div>
-
-    <div class="bg-gray-900 border border-gray-800 rounded p-4 space-y-3">
-      <div class="text-sm font-medium text-gray-300">Feedback</div>
-      <p class="text-xs text-gray-500">Describe what to change in the diagram or the MOP library. A coding agent picks this up.</p>
-      <textarea x-model="feedback" rows="4"
-        class="w-full bg-gray-800 border border-gray-700 rounded p-2 text-sm focus:outline-none focus:border-indigo-500 resize-y"
-        placeholder="e.g. 'Add a box for the violation log writer' or 'The retry loop should show the max_retries counter'"></textarea>
-      <div class="flex gap-2 items-center">
-        <button @click="submitFeedback()" :disabled="fbSaving"
-          class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 px-3 py-1.5 rounded text-sm"
-          x-text="fbSaving?'Saving…':'Submit'"></button>
-        <span x-show="fbSaved" class="text-green-400 text-sm">✓ Saved to web/diagram-feedback.txt</span>
+    <div class="card" style="padding:16px">
+      <div style="font-size:.85rem;font-weight:500;margin-bottom:6px">Feedback</div>
+      <p style="font-size:.75rem;color:#6b7280;margin:0 0 8px">Describe what to change in the diagram or the MOP library. A coding agent picks this up from web/diagram-feedback.txt.</p>
+      <textarea id="diagram-feedback" rows="4" style="width:100%;background:#0f172a;border:1px solid #374151;border-radius:5px;padding:8px;color:#f9fafb;resize:vertical;box-sizing:border-box" placeholder="e.g. 'Add violation log writer step'"></textarea>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+        <button class="btn btn-primary" onclick="submitFeedback()">Submit</button>
+        <span id="fb-status" style="font-size:.75rem;color:#4ade80"></span>
       </div>
     </div>
   </div>
@@ -486,98 +471,393 @@ HTML = """<!DOCTYPE html>
 </main>
 
 <script>
-mermaid.initialize({startOnLoad:false,theme:'dark',securityLevel:'loose'});
-
-function mopApp(){
-  return {
-    tab:'playground',
-    playText:'',backend:'haiku',evalLoading:false,verdict:null,violations:[],
-    rules:[],rulesLoading:false,
-    evalsLoading:false,evalsData:null,
-    feedback:'',fbSaving:false,fbSaved:false,
-    newEx:{id:'',text:'',violations:'',clean:'',rationale:'',category:'behavior',saving:false,ok:false,err:''},
-
-    async init(){
-      await this.loadRules();
-      await this.$nextTick();
-      mermaid.run({nodes:document.querySelectorAll('.mermaid')});
-    },
-
-    async runEval(){
-      if(!this.playText.trim())return;
-      this.evalLoading=true;this.verdict=null;
-      try{
-        const r=await fetch('/api/evaluate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:this.playText,backend:this.backend})});
-        this.verdict=await r.json();
-      }catch(e){this.verdict={action:'error',guidance:String(e)};}
-      finally{this.evalLoading=false;}
-    },
-
-    async loadViolations(){
-      const r=await fetch('/api/violations');
-      this.violations=await r.json();
-      if(!this.violations.length)alert('No real violations in patchbay log yet.');
-    },
-
-    async loadRules(){
-      this.rulesLoading=true;
-      try{
-        const r=await fetch('/api/rules');
-        this.rules=(await r.json()).map(f=>({...f,_exp:false,_edit:f.content,_saving:false,_savedOk:false,_err:''}));
-      }finally{this.rulesLoading=false;}
-    },
-
-    async saveRule(rule){
-      rule._saving=true;rule._err='';rule._savedOk=false;
-      try{
-        const r=await fetch('/api/rules/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:rule.path,content:rule._edit})});
-        if(!r.ok){const e=await r.json();rule._err=e.detail||'Save failed';}
-        else{rule.content=rule._edit;rule._savedOk=true;setTimeout(()=>rule._savedOk=false,3000);}
-      }catch(e){rule._err=String(e);}
-      finally{rule._saving=false;}
-    },
-
-    async toggleRule(rule){
-      try{
-        const r=await fetch('/api/rules/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:rule.path})});
-        const d=await r.json();rule.status=d.new_status;rule.path=d.new_path;
-      }catch(e){alert('Toggle failed: '+e);}
-    },
-
-    async runEvals(){
-      this.evalsLoading=true;this.evalsData=null;
-      try{const r=await fetch('/api/evals');this.evalsData=await r.json();}
-      catch(e){this.evalsData={error:String(e)};}
-      finally{this.evalsLoading=false;}
-    },
-
-    async addExample(){
-      if(!this.newEx.id||!this.newEx.text)return;
-      this.newEx.saving=true;this.newEx.ok=false;this.newEx.err='';
-      const violations=this.newEx.violations.trim().split(/\n+/).filter(Boolean);
-      const clean=this.newEx.clean.trim().split(/\n+/).filter(Boolean);
-      try{
-        const r=await fetch('/api/evals/add-example',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:this.newEx.id,text:this.newEx.text,expected_violations:violations,expected_clean:clean,rationale:this.newEx.rationale,category:this.newEx.category})});
-        if(!r.ok){const e=await r.json();this.newEx.err=e.detail||'Failed';}
-        else{this.newEx.ok=true;this.newEx.id='';this.newEx.text='';this.newEx.violations='';this.newEx.clean='';this.newEx.rationale='';setTimeout(()=>this.newEx.ok=false,3000);}
-      }catch(e){this.newEx.err=String(e);}
-      finally{this.newEx.saving=false;}
-    },
-
-    async submitFeedback(){
-      if(!this.feedback.trim())return;
-      this.fbSaving=true;this.fbSaved=false;
-      try{
-        await fetch('/api/diagram-feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({feedback:this.feedback})});
-        this.fbSaved=true;this.feedback='';setTimeout(()=>this.fbSaved=false,5000);
-      }finally{this.fbSaving=false;}
-    },
-  }
+// --- Tab switching ---
+function switchTab(name, fromInit) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('panel-' + name).classList.add('active');
+  document.querySelector('.tab-btn[onclick*=\'' + name + '\']').classList.add('active');
+  if (!fromInit) localStorage.setItem('mop-tab', name);
+  if (name === 'rules' && !rulesLoaded) loadRules();
+  if (name === 'diagram') setTimeout(renderMermaid, 50);
 }
+(function() {
+  const saved = localStorage.getItem('mop-tab');
+  if (saved && document.getElementById('panel-' + saved)) switchTab(saved, true);
+})();
+
+// --- Mermaid ---
+mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
+let mermaidDone = false;
+function renderMermaid() {
+  if (mermaidDone) return;
+  mermaidDone = true;
+  mermaid.run({ nodes: document.querySelectorAll('.mermaid') });
+}
+
+// --- Playground ---
+async function runEval() {
+  const text = document.getElementById('pg-text').value.trim();
+  if (!text) return;
+  const btn = document.getElementById('pg-run-btn');
+  btn.textContent = 'Running…'; btn.disabled = true;
+  try {
+    const r = await fetch('/api/evaluate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, backend: document.getElementById('pg-backend').value })
+    });
+    const d = await r.json();
+    const el = document.getElementById('pg-result');
+    el.className = 'verdict ' + (d.action || 'accept');
+    el.style.display = 'block';
+    const act = document.getElementById('pg-action');
+    act.textContent = d.action || '';
+    act.className = 'tag-' + (d.action || 'accept');
+    document.getElementById('pg-rule').textContent = d.rule || '';
+    document.getElementById('pg-guidance').textContent = d.guidance || '';
+    const rw = document.getElementById('pg-rewrite-wrap');
+    if (d.rewritten) { rw.style.display = 'block'; document.getElementById('pg-rewrite').textContent = d.rewritten; }
+    else rw.style.display = 'none';
+  } catch(e) { alert('Eval failed: ' + e); }
+  finally { btn.textContent = 'Run evaluate()'; btn.disabled = false; }
+}
+
+async function loadViolations() {
+  const r = await fetch('/api/violations');
+  const data = await r.json();
+  if (!data.length) { alert('No real violations in patchbay log yet.'); return; }
+  const list = document.getElementById('pg-vlist');
+  list.innerHTML = data.map(v =>
+    `<div onclick="useViolation(${JSON.stringify(v.text_preview)})" style="display:flex;gap:8px;align-items:center;padding:6px 10px;background:#1f2937;border-radius:4px;cursor:pointer;margin-bottom:3px">
+      <span style="color:#f87171;font-family:monospace;font-size:.7rem;flex-shrink:0">${esc(v.rule||'')}</span>
+      <span style="color:#9ca3af;font-size:.75rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(v.text_preview||'')}</span>
+    </div>`).join('');
+  document.getElementById('pg-violations').style.display = 'block';
+}
+function useViolation(text) {
+  document.getElementById('pg-text').value = text;
+  document.getElementById('pg-violations').style.display = 'none';
+}
+
+// --- Rules ---
+let rulesData = [];
+let rulesLoaded = false;
+
+async function loadRules() {
+  document.getElementById('rules-loading').style.display = 'block';
+  try {
+    const r = await fetch('/api/rules');
+    rulesData = await r.json();
+    rulesLoaded = true;
+    renderRules();
+  } finally { document.getElementById('rules-loading').style.display = 'none'; }
+}
+
+function renderRules() {
+  const list = document.getElementById('rules-list');
+  list.innerHTML = rulesData.map((file, fi) => `
+    <div class="card ${file.status === 'active' ? 'active-rule' : ''}" id="file-${fi}">
+      <div class="card-header">
+        <label class="toggle-wrap">
+          <input type="checkbox" ${file.status === 'active' ? 'checked' : ''} onchange="toggleFile(${fi})">
+          <div class="toggle-track"><div class="toggle-thumb"></div></div>
+        </label>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-family:monospace;font-size:.85rem">${esc(file.filename)}</span>
+            <span class="${file.status === 'active' ? 'badge-active' : 'badge-pending'}">${file.status}</span>
+          </div>
+          <div style="font-size:.7rem;color:#6b7280;margin-top:2px">${file.rules.map(r => r.name).map(esc).join(' · ')}</div>
+        </div>
+      </div>
+      ${file.rules.map((rule, ri) => renderRuleForm(fi, ri, rule, false)).join('')}
+      <div style="padding:8px 14px;border-top:1px solid #1f2937">
+        <button class="btn btn-ghost" style="font-size:.75rem" onclick="addRuleForm(${fi})">+ add rule</button>
+      </div>
+    </div>`).join('');
+}
+
+function renderRuleForm(fi, ri, rule, isNew) {
+  const id = `r${fi}-${ri}`;
+  const detIsLlm = rule.detector === 'llm' || rule.detector === undefined;
+  return `
+    <div class="card-body ${isNew ? 'open' : ''}" id="body-${id}">
+      ${!isNew ? `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <span style="font-size:.8rem;font-weight:600;font-family:monospace">${esc(rule.name)}</span>
+        <button class="btn btn-ghost" style="font-size:.75rem" onclick="toggleRuleBody('${id}')">collapse</button>
+      </div>` : `<div style="font-size:.8rem;font-weight:600;margin-bottom:12px;color:#a5b4fc">New Rule</div>`}
+      <div class="field-row-2">
+        <div class="field"><label>Name *</label><input type="text" id="${id}-name" value="${esc(rule.name||'')}"></div>
+        <div class="field"><label>Description</label><input type="text" id="${id}-desc" value="${esc(rule.description||'')}"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Detector</label>
+          <select id="${id}-det" onchange="onDetectorChange('${id}')">
+            <option value="llm" ${detIsLlm?'selected':''}>llm</option>
+            <option value="deterministic" ${!detIsLlm?'selected':''}>deterministic</option>
+          </select>
+        </div>
+        <div class="field"><label>On violation</label>
+          <select id="${id}-onv">
+            <option value="reject" ${rule.on_violation==='reject'?'selected':''}>reject (retry)</option>
+            <option value="edit" ${rule.on_violation==='edit'?'selected':''}>edit (rewrite)</option>
+            <option value="warn" ${rule.on_violation==='warn'?'selected':''}>warn (log only)</option>
+          </select>
+        </div>
+        <div class="field"><label>Severity</label>
+          <select id="${id}-sev">
+            <option value="violation" ${rule.severity==='violation'?'selected':''}>violation</option>
+            <option value="warn" ${rule.severity==='warn'?'selected':''}>warn</option>
+          </select>
+        </div>
+      </div>
+      <!-- LLM params -->
+      <div id="${id}-llm-params" style="${detIsLlm?'':'display:none'}">
+        <div class="field"><label>LLM Prompt</label>
+          <textarea id="${id}-prompt" rows="5" style="width:100%;background:#0f172a;border:1px solid #374151;border-radius:5px;padding:8px;color:#f9fafb;box-sizing:border-box">${esc(rule.llm_prompt||'')}</textarea>
+        </div>
+      </div>
+      <!-- Deterministic params -->
+      <div id="${id}-det-params" style="${!detIsLlm?'':'display:none'}">
+        <div class="field-row-2">
+          <div class="field"><label>Type</label>
+            <select id="${id}-dtype" onchange="onDetTypeChange('${id}')">
+              <option value="regex" ${(rule.det_type||'regex')==='regex'?'selected':''}>regex</option>
+              <option value="word_count" ${rule.det_type==='word_count'?'selected':''}>word_count</option>
+            </select>
+          </div>
+          <div class="field" id="${id}-maxwords-wrap" style="${rule.det_type==='word_count'?'':'display:none'}">
+            <label>Max words</label>
+            <input type="text" id="${id}-maxwords" value="${esc(String(rule.det_max_words||200))}">
+          </div>
+        </div>
+        <div class="field" id="${id}-patterns-wrap" style="${rule.det_type==='word_count'?'display:none':''}">
+          <label>Patterns (one regex per line)</label>
+          <textarea id="${id}-patterns" rows="4" style="width:100%;background:#0f172a;border:1px solid #374151;border-radius:5px;padding:8px;color:#f9fafb;box-sizing:border-box">${esc((rule.det_patterns||[]).join('\n'))}</textarea>
+        </div>
+      </div>
+      <div class="field"><label>Guidance (shown to Claude on violation)</label>
+        <textarea id="${id}-guidance" rows="3" style="width:100%;background:#0f172a;border:1px solid #374151;border-radius:5px;padding:8px;color:#f9fafb;box-sizing:border-box">${esc(rule.guidance||'')}</textarea>
+      </div>
+      <div class="field"><label>Rationale (internal notes)</label>
+        <textarea id="${id}-rationale" rows="2" style="width:100%;background:#0f172a;border:1px solid #374151;border-radius:5px;padding:8px;color:#f9fafb;box-sizing:border-box">${esc(rule.rationale||'')}</textarea>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+        <button class="btn btn-primary" onclick="${isNew ? `saveNewRule(${fi},'${id}')` : `saveRule(${fi},${ri},'${id}')`}">Save</button>
+        <button class="btn btn-ghost" onclick="${isNew ? `cancelNewRule(${fi})` : `toggleRuleBody('${id}')`}">Cancel</button>
+        <span id="${id}-status" style="font-size:.75rem"></span>
+      </div>
+    </div>`;
+}
+
+function toggleRuleBody(id) {
+  const body = document.getElementById('body-' + id);
+  body.classList.toggle('open');
+}
+
+function onDetectorChange(id) {
+  const det = document.getElementById(id + '-det').value;
+  document.getElementById(id + '-llm-params').style.display = det === 'llm' ? '' : 'none';
+  document.getElementById(id + '-det-params').style.display = det === 'deterministic' ? '' : 'none';
+}
+
+function onDetTypeChange(id) {
+  const t = document.getElementById(id + '-dtype').value;
+  document.getElementById(id + '-patterns-wrap').style.display = t === 'word_count' ? 'none' : '';
+  document.getElementById(id + '-maxwords-wrap').style.display = t === 'word_count' ? '' : 'none';
+}
+
+function collectRule(id) {
+  const det = document.getElementById(id + '-det').value;
+  const dtype = det === 'deterministic' ? document.getElementById(id + '-dtype').value : null;
+  return {
+    name: document.getElementById(id + '-name').value.trim(),
+    description: document.getElementById(id + '-desc').value.trim(),
+    detector: det,
+    severity: document.getElementById(id + '-sev').value,
+    on_violation: document.getElementById(id + '-onv').value,
+    guidance: document.getElementById(id + '-guidance').value.trim(),
+    rationale: document.getElementById(id + '-rationale').value.trim(),
+    llm_prompt: det === 'llm' ? document.getElementById(id + '-prompt').value.trim() : '',
+    det_type: dtype || 'regex',
+    det_patterns: (dtype === 'regex' && document.getElementById(id + '-patterns'))
+      ? document.getElementById(id + '-patterns').value.trim().split(/\n+/).filter(Boolean) : [],
+    det_max_words: (dtype === 'word_count' && document.getElementById(id + '-maxwords'))
+      ? parseInt(document.getElementById(id + '-maxwords').value) || 200 : null,
+  };
+}
+
+async function saveRule(fi, ri, id) {
+  const rule = collectRule(id);
+  if (!rule.name) { showStatus(id, 'Name required', 'error'); return; }
+  showStatus(id, 'Saving…', 'gray');
+  try {
+    const r = await fetch('/api/rules/save-rule', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_path: rulesData[fi].path, original_name: rulesData[fi].rules[ri].name, rule })
+    });
+    if (!r.ok) { const e = await r.json(); showStatus(id, e.detail || 'Error', 'error'); return; }
+    rulesData[fi].rules[ri] = rule;
+    showStatus(id, '✓ Saved', 'ok');
+    setTimeout(() => { showStatus(id, '', ''); }, 3000);
+  } catch(e) { showStatus(id, String(e), 'error'); }
+}
+
+function addRuleForm(fi) {
+  const id = `r${fi}-new`;
+  const existing = document.getElementById('body-' + id);
+  if (existing) { existing.classList.add('open'); return; }
+  const blankRule = { name:'', description:'', detector:'llm', severity:'violation', on_violation:'reject', guidance:'', rationale:'', llm_prompt:'', det_type:'regex', det_patterns:[], det_max_words:null };
+  const card = document.getElementById('file-' + fi);
+  const addBtn = card.querySelector('[onclick^="addRuleForm"]').parentElement;
+  const newDiv = document.createElement('div');
+  newDiv.innerHTML = renderRuleForm(fi, 'new', blankRule, true);
+  card.insertBefore(newDiv.firstElementChild, addBtn);
+}
+
+function cancelNewRule(fi) {
+  const id = `r${fi}-new`;
+  const el = document.getElementById('body-' + id);
+  if (el) el.parentElement.remove();
+}
+
+async function saveNewRule(fi, id) {
+  const rule = collectRule(id);
+  if (!rule.name) { showStatus(id, 'Name required', 'error'); return; }
+  showStatus(id, 'Saving…', 'gray');
+  try {
+    const r = await fetch('/api/rules/add-rule', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_path: rulesData[fi].path, rule })
+    });
+    if (!r.ok) { const e = await r.json(); showStatus(id, e.detail || 'Error', 'error'); return; }
+    rulesData[fi].rules.push(rule);
+    showStatus(id, '✓ Saved', 'ok');
+    setTimeout(renderRules, 1500);
+  } catch(e) { showStatus(id, String(e), 'error'); }
+}
+
+async function toggleFile(fi) {
+  try {
+    const r = await fetch('/api/rules/toggle', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: rulesData[fi].path })
+    });
+    const d = await r.json();
+    rulesData[fi].status = d.new_status;
+    rulesData[fi].path = d.new_path;
+    renderRules();
+  } catch(e) { alert('Toggle failed: ' + e); }
+}
+
+function showStatus(id, msg, type) {
+  const el = document.getElementById(id + '-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = type === 'ok' ? '#4ade80' : type === 'error' ? '#f87171' : '#9ca3af';
+}
+
+// Show rule forms when clicking a collapsed rule
+function showRuleEditor(fi, ri) {
+  const id = `r${fi}-${ri}`;
+  const body = document.getElementById('body-' + id);
+  if (body) body.classList.add('open');
+}
+
+// Make file headers clickable to expand first rule
+document.addEventListener('click', e => {
+  const header = e.target.closest('.card-header');
+  if (!header) return;
+  const card = header.parentElement;
+  const bodies = card.querySelectorAll('.card-body');
+  if (bodies.length === 0) return;
+  // Don't intercept toggle checkbox clicks
+  if (e.target.type === 'checkbox') return;
+  bodies[0].classList.toggle('open');
+});
+
+// --- Evals ---
+async function runEvals() {
+  const btn = document.getElementById('evals-run-btn');
+  btn.textContent = 'Running…'; btn.disabled = true;
+  const res = document.getElementById('evals-result');
+  res.style.display = 'none';
+  try {
+    const r = await fetch('/api/evals');
+    const d = await r.json();
+    if (d.error) {
+      res.innerHTML = `<div style="color:#f87171;font-size:.85rem">${esc(d.error)}</div>`;
+    } else {
+      const s = d.summary || {};
+      const mm = (d.mismatches || []).map(m =>
+        `<div class="mismatch-row"><span style="color:#f87171;font-family:monospace">${esc(m.type)}</span>
+         <span style="color:#d1d5db;margin-left:8px">${esc(m.rule)} vs ${esc(m.example)}</span></div>`).join('');
+      res.innerHTML = `
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px">
+          <div class="stat"><div style="font-size:1.5rem;font-weight:700;color:#4ade80">${s.correct||0}</div><div style="font-size:.7rem;color:#9ca3af;margin-top:4px">Correct</div></div>
+          <div class="stat"><div style="font-size:1.5rem;font-weight:700;color:#f87171">${s.mismatches||0}</div><div style="font-size:.7rem;color:#9ca3af;margin-top:4px">Mismatches</div></div>
+          <div class="stat"><div style="font-size:1.5rem;font-weight:700;color:#f9fafb">${s.examples||0}</div><div style="font-size:.7rem;color:#9ca3af;margin-top:4px">Examples</div></div>
+          <div class="stat"><div style="font-size:1.5rem;font-weight:700;color:#fbbf24">${s.rules_llm_skipped||0}</div><div style="font-size:.7rem;color:#9ca3af;margin-top:4px">LLM skipped</div></div>
+        </div>
+        ${mm || '<div style="color:#4ade80;font-size:.85rem">✓ All deterministic evals pass</div>'}`;
+    }
+    res.style.display = 'block';
+  } catch(e) { res.innerHTML = `<div style="color:#f87171">${esc(String(e))}</div>`; res.style.display = 'block'; }
+  finally { btn.textContent = 'Run harness'; btn.disabled = false; }
+}
+
+async function addExample() {
+  const id = document.getElementById('ex-id').value.trim();
+  const text = document.getElementById('ex-text').value.trim();
+  if (!id || !text) { alert('ID and text required.'); return; }
+  const violations = document.getElementById('ex-violations').value.trim().split(/\n+/).filter(Boolean);
+  const clean = document.getElementById('ex-clean').value.trim().split(/\n+/).filter(Boolean);
+  const status = document.getElementById('ex-status');
+  status.textContent = 'Saving…'; status.style.color = '#9ca3af';
+  try {
+    const r = await fetch('/api/evals/add-example', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, text, expected_violations: violations, expected_clean: clean,
+        rationale: document.getElementById('ex-rationale').value.trim(),
+        category: document.getElementById('ex-cat').value,
+        source: document.getElementById('ex-src').value })
+    });
+    if (!r.ok) { const e = await r.json(); status.textContent = e.detail || 'Error'; status.style.color = '#f87171'; }
+    else {
+      status.textContent = '✓ Added'; status.style.color = '#4ade80';
+      ['ex-id','ex-text','ex-violations','ex-clean','ex-rationale'].forEach(i => document.getElementById(i).value = '');
+      setTimeout(() => status.textContent = '', 3000);
+    }
+  } catch(e) { status.textContent = String(e); status.style.color = '#f87171'; }
+}
+
+// --- Diagram ---
+async function submitFeedback() {
+  const text = document.getElementById('diagram-feedback').value.trim();
+  if (!text) return;
+  const status = document.getElementById('fb-status');
+  status.textContent = 'Saving…'; status.style.color = '#9ca3af';
+  try {
+    await fetch('/api/diagram-feedback', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feedback: text })
+    });
+    status.textContent = '✓ Saved to web/diagram-feedback.txt';
+    document.getElementById('diagram-feedback').value = '';
+    setTimeout(() => status.textContent = '', 5000);
+  } catch(e) { status.textContent = String(e); }
+}
+
+// --- Util ---
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Boot
+loadRules();
 </script>
 </body>
-</html>
-"""
+</html>"""
 
 
 @app.get("/", response_class=HTMLResponse)
