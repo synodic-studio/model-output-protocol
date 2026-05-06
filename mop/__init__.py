@@ -11,6 +11,7 @@ from .filter import (
     RewrittenVerdict,
     Verdict,
     evaluate,
+    justify,
 )
 from .rewrite import TelegramMessage, rewrite
 
@@ -23,5 +24,6 @@ __all__ = [
     "TelegramMessage",
     "Verdict",
     "evaluate",
+    "justify",
     "rewrite",
 ]

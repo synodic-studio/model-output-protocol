@@ -1,6 +1,13 @@
 """MOP filter — evaluates a message against active rules.
 
-Entry point: `evaluate(text, config)` returns a `Verdict` — one of:
+Entry points:
+  evaluate(text, config)             → Verdict (AcceptedVerdict | RejectedVerdict | RewrittenVerdict)
+  justify(original, reason, config)  → AcceptedVerdict | RejectedVerdict
+
+`evaluate` checks outbound text; `justify` checks whether a stated reason for an action
+is permitted by active rules (never shown to the user — purely internal gate).
+
+Verdict cases:
   AcceptedVerdict        — no rule fired
   RejectedVerdict        — rule fired, on_violation=reject; carries violations list
   RewrittenVerdict       — rule fired, on_violation=edit; carries rewritten text once filled
@@ -296,5 +303,75 @@ async def evaluate(text: str, config: MopConfig | None = None) -> Verdict:
         violations=violations,
         rewritten=last_rewrite,
         reason=last_reason,
+        guidance=last_guidance,
+    )
+
+
+async def justify(
+    original_text: str,
+    reason: str,
+    rule_names: list[str],
+    config: MopConfig | None = None,
+) -> AcceptedVerdict | RejectedVerdict:
+    """Evaluate a reason against a specific subset of rules.
+
+    Used when the agent wants to assert that a response is safe despite apparent
+    violations — it submits a justification and MOP decides whether to accept it.
+
+    Only the rules named in `rule_names` are evaluated (matched by name). If no
+    named rules exist in the active set, returns AcceptedVerdict (nothing to check
+    against). Rules with on_violation='edit' are treated as 'reject' here — justify
+    never rewrites, it only approves or denies.
+
+    Returns AcceptedVerdict if the reason satisfies all named rules, or
+    RejectedVerdict listing which rules were not satisfied.
+    """
+    if not reason.strip():
+        return RejectedVerdict(
+            rule="empty-justification",
+            violations=["empty-justification"],
+            reason="Justification was empty",
+            guidance="Provide a non-empty reason for why this response is acceptable.",
+        )
+
+    cfg = config or MopConfig()
+    all_rules = _load_rules(cfg.rules_dir)
+    rule_map = {r.name: r for r in all_rules}
+
+    target_rules = [rule_map[n] for n in rule_names if n in rule_map]
+    if not target_rules:
+        return AcceptedVerdict()
+
+    violations: list[str] = []
+    last_guidance: str | None = None
+
+    for rule in target_rules:
+        guidance = rule.guidance.strip() if rule.guidance else None
+        fired = False
+
+        if rule.detector == "deterministic":
+            fired = _eval_deterministic(rule, reason)
+        elif rule.detector == "llm":
+            if cfg.llm_backend == "haiku":
+                llm_result = await _eval_llm_haiku(rule, reason)
+                fired = llm_result.action != "accept"
+            elif cfg.llm_backend == "gemma4":
+                fired = await _eval_llm_gemma4(rule, reason)
+            else:
+                fired = await _eval_llm_stub(rule, reason)
+
+        if fired:
+            if cfg.log_violations:
+                logger.info("MOP justify rejected: rule=%s", rule.name)
+            violations.append(rule.name)
+            last_guidance = guidance
+
+    if not violations:
+        return AcceptedVerdict()
+
+    return RejectedVerdict(
+        rule=violations[-1],
+        violations=violations,
+        reason=f"Justification did not satisfy rules: {', '.join(violations)}",
         guidance=last_guidance,
     )
