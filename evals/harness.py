@@ -34,9 +34,11 @@ except ImportError:
     sys.exit(1)
 
 
+import os
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
-RULES_DIR = REPO_ROOT / "rules" / "active"
-CORPUS_DIR = Path(__file__).resolve().parent / "counterexamples"
+RULES_DIR = Path(os.environ.get("MOP_RULES_DIR", REPO_ROOT / "rules")) / "active"
+CORPUS_DIR = Path(os.environ.get("MOP_EVALS_CORPUS", Path(__file__).resolve().parent / "counterexamples"))
 
 
 @dataclass

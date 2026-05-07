@@ -1,12 +1,12 @@
-"""MOP hooks — pure functions consumed by the host (patchbay).
+"""MOP hooks — pure functions consumed by the host.
 
 `protocol_prompt(rules)` is a pure function that returns a system-prompt
 fragment describing the MOP protocol to the agent. NOT a CC SessionStart
-hook — patchbay calls it at SDK-init and concatenates the result into
+hook — the host calls it at SDK-init and concatenates the result into
 ClaudeAgentOptions.system_prompt. Same effect (the protocol is in
 context every turn), simpler lifecycle (no plugin needed).
 
-`stop(mop)` is the body of a CC Stop hook callback. Patchbay registers
+`stop(mop)` is the body of a CC Stop hook callback. The host registers
 it via ClaudeAgentOptions.hooks, closing over the per-session MOP
 instance. Returns Gate (Allow | Block). On Allow it also flips
 sentMessageThisTurn back to False so the next turn starts clean.
@@ -62,7 +62,7 @@ from .protocol import MOP
 def stop(mop: MOP) -> Gate:
     """CC Stop hook body. Block turn-end if no message was sent this turn.
 
-    Patchbay registers this via ClaudeAgentOptions.hooks, closing over the
+    The host registers this via ClaudeAgentOptions.hooks, closing over the
     per-session MOP instance:
 
         async def stop_hook(input, tool_use_id, context):

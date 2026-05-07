@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Example launchd agent for running the MOP Studio web UI on a Mac host.
+
+  Replace REPO_PATH with the absolute path to your clone of this repo.
+  Replace USER_LOCAL_BIN if your `uv` is not at $HOME/.local/bin/uv.
+
+  Install with:
+    cp this-file ~/Library/LaunchAgents/com.example.mop-web.plist
+    launchctl load  ~/Library/LaunchAgents/com.example.mop-web.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.example.mop-web</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>REPO_PATH/web/run-web.sh</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>REPO_PATH</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>REPO_PATH/logs/web.log</string>
+    <key>StandardErrorPath</key>
+    <string>REPO_PATH/logs/web.err</string>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>USER_LOCAL_BIN:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>

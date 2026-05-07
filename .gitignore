@@ -6,3 +6,10 @@ __pycache__/
 
 uv.lock
 logs/
+build/
+
+# Machine-specific (deployed launchd plists carry absolute paths;
+# only the templated example under docs/ is checked in)
+*.plist
+!docs/*.plist
+web/diagram-feedback.txt

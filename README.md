@@ -59,8 +59,8 @@ The agent never streams text directly to the user. The MCP tool result is what t
 
 MOP is transport-agnostic and LLM-agnostic. Hosts inject:
 
-- **`evaluator(text, regex_hints, justification?)`** — async callable returning a Verdict. patchbay-relay wires this to Haiku via pydantic-ai.
-- **`deliver(text, system_note?)`** — async callable that gets the message in front of the user. patchbay-relay wires this to Telegram.
+- **`evaluator(text, regex_hints, justification?)`** — async callable returning a Verdict. The reference adapter `mop.build_haiku_evaluator` wraps Anthropic Haiku via pydantic-ai.
+- **`deliver(text, system_note?)`** — async callable that gets the message in front of the user. Whatever channel the host owns (Telegram, Slack, web socket, …).
 
 Plus `mop.protocol_prompt(rules)` — a pure function the host concatenates into `ClaudeAgentOptions.system_prompt` so the agent knows the protocol exists.
 
@@ -68,7 +68,7 @@ See `mop/protocol.py` for the `MOP` class and `mop/mcp.py` for the in-process MC
 
 ## Examples
 
-Real Haiku verdicts against three patchbay-flavored agent messages, run through `mop.build_haiku_evaluator` with three rules: `no-permission-asking-for-doable-work`, `no-commit-hashes` ("user has no interest in SHAs"), and `no-environment-vars` ("user does not configure env vars by hand").
+Real Haiku verdicts against three sample agent messages, run through `mop.build_haiku_evaluator` with three rules: `no-permission-asking-for-doable-work`, `no-commit-hashes` ("user has no interest in SHAs"), and `no-environment-vars` ("user does not configure env vars by hand").
 
 ### ✅ Accepted
 

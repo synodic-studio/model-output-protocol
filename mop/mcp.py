@@ -2,7 +2,7 @@
 
 `build_mcp_server(mop)` returns a `McpSdkServerConfig` ready to plug
 into `ClaudeAgentOptions.mcp_servers`. Tools close over the MOP instance,
-so all state lives in patchbay's process — one MOP per CC session.
+so all state lives in the host process — one MOP per CC session.
 
 The four tools mirror MOP's protocol surface:
   - submit_message(message)

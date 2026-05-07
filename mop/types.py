@@ -14,8 +14,8 @@ EvalLLMResponse — the protocol-owned structured-output schema that every
 LLM adapter (Haiku via pydantic-ai today, others later) must produce.
 Adapters hand this schema to their LLM library for structured-output
 decoding, then call `verdict_from_eval_response()` to get a runtime
-Verdict. Keeping the schema here (not in patchbay) means the wire
-protocol is one definition for all future adapters.
+Verdict. Keeping the schema here (not in any specific host) means the
+wire protocol is one definition for all future adapters.
 """
 
 from __future__ import annotations
@@ -75,10 +75,10 @@ class NoPendingMessageError(Exception):
 
 
 # ─── Protocol-owned LLM structured-output schema ──────────────────────
-# Every LLM adapter must produce this shape. Patchbay's haiku adapter
-# hands this class to pydantic-ai's `output_type=`. Future adapters
-# (Gemma, GPT, local models) do the equivalent for their library and
-# also produce this schema. The runtime Verdict is built from it via
+# Every LLM adapter must produce this shape. The reference Haiku adapter
+# (`mop.haiku`) hands this class to pydantic-ai's `output_type=`. Future
+# adapters (Gemma, GPT, local models) do the equivalent for their library
+# and also produce this schema. The runtime Verdict is built from it via
 # `verdict_from_eval_response()`.
 
 class EvalLLMResponse(BaseModel):
@@ -109,14 +109,14 @@ def verdict_from_eval_response(
 # Documentation only; runtime uses Callable directly.
 
 # Evaluator: the LLM call that decides accepted | rewritten | rejected.
-#   Patchbay wraps pydantic-ai + Haiku into this signature.
+#   The reference adapter wraps pydantic-ai + Haiku into this signature.
 Evaluator = Callable[
     [str, list[str], "str | None"],  # text, regex_hints, justification
     Awaitable["Verdict"],
 ]
 
 # Deliver: how a verdict's deliverable text reaches the user channel.
-#   Patchbay's Telegram send is the closure body.
+#   A typical host body sends to Telegram, Slack, a web UI, etc.
 Deliver = Callable[
     [str, "str | None"],  # text, system_note (optional, e.g. failed-open warning)
     "Awaitable[None]",

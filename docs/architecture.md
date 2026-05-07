@@ -38,7 +38,7 @@ sent_message_this_turn: bool = False
 max_justification_attempts: int = 4
 ```
 
-The host pins the MOP instance for the lifetime of the SDK client (e.g. `SessionState.mop` in patchbay-relay) so the Stop-hook closure stays alive.
+The host pins the MOP instance for the lifetime of the SDK client (typically a per-session struct that owns the client) so the Stop-hook closure stays alive.
 
 ---
 
@@ -78,7 +78,7 @@ MOP(
 )
 ```
 
-This keeps MOP transport-agnostic and LLM-agnostic. patchbay-relay's wiring lives in `patchbay/mop_evaluator.py` (Haiku via pydantic-ai) and `patchbay/mop_deliver.py` (Telegram).
+This keeps MOP transport-agnostic and LLM-agnostic. The reference Haiku evaluator lives in `mop.haiku` (`build_haiku_evaluator`); the host supplies its own `deliver` (Telegram, Slack, web socket, …).
 
 ---
 
@@ -99,7 +99,7 @@ class EvalLLMResponse(BaseModel):
 
 **Problem:** MOP delivers via discrete tool calls. Channels stream partial output as it arrives. These are mutually exclusive.
 
-**Current behavior:** `cc-sdk-mop` harness in patchbay-relay sets `supports_inflight_push=False`. Channel mode is incompatible.
+**Current behavior:** SDK-based MOP harnesses must declare `supports_inflight_push=False`. Channel mode is incompatible with discrete-tool delivery.
 
 **Intended resolution (in priority order):**
 
@@ -137,8 +137,7 @@ Active rules in `rules/active/`. Pending rules in `rules/pending/`. Promote with
 - [x] `mop.hooks.stop()` Stop-hook callable
 - [x] In-process MCP server builder
 - [x] EvalLLMResponse wire schema + verdict_from_eval_response
-- [x] patchbay-relay integration (cc-sdk-mop harness)
-- [x] Live verified end-to-end (Telegram text + photo + document paths)
+- [x] Live verified end-to-end via [patchbay-relay](https://github.com/synodic-studio/patchbay-relay) (Telegram text + photo + document paths)
 - [ ] Channels compatibility (audit-only mode)
-- [ ] CC plugin form of Stop hook (for cc-cli / pi harnesses)
+- [ ] CC plugin form of Stop hook (for non-SDK harnesses)
 - [ ] Streaming deterministic eval in channel mode

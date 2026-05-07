@@ -1,7 +1,9 @@
 """MOP Studio — playground, rules config, evals, system diagram.
 
-Run:   uv run web/app.py
-URL:   http://bajor:7731  (Tailscale)
+Run:    uv run web/app.py
+Env:    MOP_WEB_HOST  (default 127.0.0.1)
+        MOP_WEB_PORT  (default 7731)
+        MOP_RULES_DIR (default <repo>/rules — must contain active/ and pending/)
 """
 
 from __future__ import annotations
@@ -32,11 +34,11 @@ from mop import (  # noqa: E402
     load_rules,
 )
 
-RULES_ACTIVE = REPO_ROOT / "rules" / "active"
-RULES_PENDING = REPO_ROOT / "rules" / "pending"
-EVALS_DIR = REPO_ROOT / "evals"
-FEEDBACK_FILE = REPO_ROOT / "web" / "diagram-feedback.txt"
-PATCHBAY_VIOLATIONS = Path.home() / "Developer/patchbay-relay/logs/mop-violations.jsonl"
+RULES_DIR = Path(os.environ.get("MOP_RULES_DIR", REPO_ROOT / "rules"))
+RULES_ACTIVE = RULES_DIR / "active"
+RULES_PENDING = RULES_DIR / "pending"
+EVALS_DIR = Path(os.environ.get("MOP_EVALS_DIR", REPO_ROOT / "evals"))
+FEEDBACK_FILE = Path(os.environ.get("MOP_FEEDBACK_FILE", REPO_ROOT / "web" / "diagram-feedback.txt"))
 
 app = FastAPI(title="MOP Studio")
 
@@ -270,22 +272,6 @@ def api_add_example(req: AddExampleRequest):
     return JSONResponse({"ok": True, "path": str(dest.relative_to(REPO_ROOT))})
 
 
-@app.get("/api/violations")
-def api_violations():
-    if not PATCHBAY_VIOLATIONS.exists():
-        return JSONResponse([])
-    lines = PATCHBAY_VIOLATIONS.read_text().strip().splitlines()
-    entries = []
-    for line in reversed(lines[-100:]):
-        try:
-            e = json.loads(line)
-            if e.get("text_preview", "").strip():
-                entries.append(e)
-        except json.JSONDecodeError:
-            pass
-    return JSONResponse(entries[:30])
-
-
 @app.post("/api/diagram-feedback")
 def api_feedback(req: FeedbackRequest):
     FEEDBACK_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -318,6 +304,20 @@ textarea,input,select{font-family:ui-monospace,monospace;font-size:.8rem}
 .card-header{display:flex;align-items:center;gap:12px;padding:10px 14px}
 .card-body{border-top:1px solid #1f2937;padding:14px;display:none}
 .card-body.open{display:block}
+.rule-row{border-top:1px solid #1f2937}
+.rule-row-header{display:flex;align-items:center;gap:10px;padding:8px 14px;cursor:pointer;user-select:none}
+.rule-row-header:hover{background:#0f172a}
+.rule-row-header .chev{color:#6b7280;font-size:.75rem;transition:transform .15s;display:inline-block;width:10px}
+.rule-row.open .rule-row-header .chev{transform:rotate(90deg)}
+.rule-row-body{display:none;padding:12px 14px;background:#0a0f1c;border-top:1px solid #111827}
+.rule-row.open .rule-row-body{display:block}
+.det-pill{font-size:.6rem;padding:1px 6px;border-radius:3px;font-family:monospace;text-transform:uppercase;letter-spacing:.05em}
+.det-pill.llm{background:#1e1b4b;color:#a5b4fc}
+.det-pill.det{background:#1c1917;color:#fbbf24}
+.seg{display:inline-flex;background:#0f172a;border:1px solid #374151;border-radius:5px;padding:2px;gap:2px}
+.seg button{background:transparent;border:none;color:#9ca3af;font-size:.75rem;padding:5px 12px;border-radius:3px;cursor:pointer;font-family:inherit}
+.seg button.on{background:#4f46e5;color:#fff}
+.seg button:hover:not(.on){color:#e5e7eb}
 .field{margin-bottom:12px}
 .field label{display:block;font-size:.7rem;color:#9ca3af;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em}
 .field input[type=text],.field textarea,.field select{width:100%;background:#0f172a;border:1px solid #374151;border-radius:5px;padding:6px 8px;color:#f9fafb;box-sizing:border-box}
@@ -360,7 +360,7 @@ select{background:#0f172a;border:1px solid #374151;border-radius:4px;padding:4px
     <button class="tab-btn" onclick="switchTab('evals')">evals</button>
     <button class="tab-btn" onclick="switchTab('diagram')">diagram</button>
   </div>
-  <div style="margin-left:auto;font-size:.7rem;color:#6b7280">bajor:7731</div>
+  <div style="margin-left:auto;font-size:.7rem;color:#6b7280">MOP Studio</div>
 </header>
 
 <main style="max-width:900px;margin:0 auto;padding:20px 16px">
@@ -370,7 +370,6 @@ select{background:#0f172a;border:1px solid #374151;border-radius:4px;padding:4px
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">
       <span style="font-weight:600">Playground</span>
       <span style="font-size:.7rem;color:#9ca3af">runs your text through <code style="color:#a5b4fc">submit_message</code> against the active rules — Haiku evaluator</span>
-      <button class="btn btn-ghost" onclick="loadViolations()">↑ load recent violation</button>
     </div>
     <textarea id="pg-text" rows="8" style="width:100%;background:#1f2937;border:1px solid #374151;border-radius:6px;padding:10px;color:#f9fafb;resize:vertical;box-sizing:border-box" placeholder="Paste a Claude response to test against active rules…"></textarea>
     <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
@@ -387,10 +386,6 @@ select{background:#0f172a;border:1px solid #374151;border-radius:4px;padding:4px
         <pre id="pg-rewrite" style="font-size:.8rem;background:#0f172a;border-radius:4px;padding:10px;white-space:pre-wrap;margin:0;color:#f9fafb"></pre>
       </div>
       <p id="pg-system-note" style="display:none;font-size:.75rem;color:#fca5a5;margin:8px 0 0;font-style:italic"></p>
-    </div>
-    <div id="pg-violations" style="display:none;margin-top:12px">
-      <div style="font-size:.7rem;color:#6b7280;margin-bottom:6px">Click to load:</div>
-      <div id="pg-vlist" style="max-height:200px;overflow-y:auto"></div>
     </div>
   </div>
 
@@ -528,23 +523,6 @@ async function runEval() {
   finally { btn.textContent = 'Run submit_message()'; btn.disabled = false; }
 }
 
-async function loadViolations() {
-  const r = await fetch('/api/violations');
-  const data = await r.json();
-  if (!data.length) { alert('No real violations in patchbay log yet.'); return; }
-  const list = document.getElementById('pg-vlist');
-  list.innerHTML = data.map(v =>
-    `<div onclick="useViolation(${JSON.stringify(v.text_preview)})" style="display:flex;gap:8px;align-items:center;padding:6px 10px;background:#1f2937;border-radius:4px;cursor:pointer;margin-bottom:3px">
-      <span style="color:#f87171;font-family:monospace;font-size:.7rem;flex-shrink:0">${esc(v.rule||'')}</span>
-      <span style="color:#9ca3af;font-size:.75rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(v.text_preview||'')}</span>
-    </div>`).join('');
-  document.getElementById('pg-violations').style.display = 'block';
-}
-function useViolation(text) {
-  document.getElementById('pg-text').value = text;
-  document.getElementById('pg-violations').style.display = 'none';
-}
-
 // --- Rules ---
 let rulesData = [];
 let rulesLoaded = false;
@@ -561,109 +539,142 @@ async function loadRules() {
 
 function renderRules() {
   const list = document.getElementById('rules-list');
-  list.innerHTML = rulesData.map((file, fi) => `
+  list.innerHTML = rulesData.map((file, fi) => {
+    const ruleCount = file.rules.length;
+    const ruleLabel = ruleCount === 1 ? '1 rule' : `${ruleCount} rules`;
+    return `
     <div class="card ${file.status === 'active' ? 'active-rule' : ''}" id="file-${fi}">
       <div class="card-header">
-        <label class="toggle-wrap">
+        <label class="toggle-wrap" title="${file.status === 'active' ? 'Active — used at runtime' : 'Pending — staged but not enforced'}">
           <input type="checkbox" ${file.status === 'active' ? 'checked' : ''} onchange="toggleFile(${fi})">
           <div class="toggle-track"><div class="toggle-thumb"></div></div>
         </label>
         <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:center;gap:8px">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
             <span style="font-family:monospace;font-size:.85rem">${esc(file.filename)}</span>
             <span class="${file.status === 'active' ? 'badge-active' : 'badge-pending'}">${file.status}</span>
+            <span style="font-size:.7rem;color:#6b7280">${ruleLabel}</span>
           </div>
-          <div style="font-size:.7rem;color:#6b7280;margin-top:2px">${file.rules.map(r => r.name).map(esc).join(' · ')}</div>
         </div>
       </div>
-      ${file.rules.map((rule, ri) => renderRuleForm(fi, ri, rule, false)).join('')}
+      ${file.rules.map((rule, ri) => renderRuleRow(fi, ri, rule)).join('')}
+      <div id="newrule-slot-${fi}"></div>
       <div style="padding:8px 14px;border-top:1px solid #1f2937">
         <button class="btn btn-ghost" style="font-size:.75rem" onclick="addRuleForm(${fi})">+ add rule</button>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
-function renderRuleForm(fi, ri, rule, isNew) {
+function renderRuleRow(fi, ri, rule) {
   const id = `r${fi}-${ri}`;
-  const detIsLlm = rule.detector === 'llm' || rule.detector === undefined;
+  const det = rule.detector || 'llm';
+  const detLabel = det === 'llm' ? 'LLM' : (rule.det_type === 'word_count' ? 'WORD COUNT' : 'REGEX');
+  const detClass = det === 'llm' ? 'llm' : 'det';
   return `
-    <div class="card-body ${isNew ? 'open' : ''}" id="body-${id}">
-      ${!isNew ? `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-        <span style="font-size:.8rem;font-weight:600;font-family:monospace">${esc(rule.name)}</span>
-        <button class="btn btn-ghost" style="font-size:.75rem" onclick="toggleRuleBody('${id}')">collapse</button>
-      </div>` : `<div style="font-size:.8rem;font-weight:600;margin-bottom:12px;color:#a5b4fc">New Rule</div>`}
-      <div class="field-row-2">
-        <div class="field"><label>Name *</label><input type="text" id="${id}-name" value="${esc(rule.name||'')}"></div>
-        <div class="field"><label>Description</label><input type="text" id="${id}-desc" value="${esc(rule.description||'')}"></div>
+    <div class="rule-row" id="row-${id}">
+      <div class="rule-row-header" onclick="toggleRuleBody('${id}')">
+        <span class="chev">▶</span>
+        <span style="font-family:monospace;font-size:.8rem;font-weight:600">${esc(rule.name)}</span>
+        <span class="det-pill ${detClass}">${detLabel}</span>
+        <span style="font-size:.7rem;color:#6b7280;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(rule.description || '')}</span>
       </div>
-      <div class="field-row">
-        <div class="field"><label>Detector</label>
-          <select id="${id}-det" onchange="onDetectorChange('${id}')">
-            <option value="llm" ${detIsLlm?'selected':''}>llm</option>
-            <option value="deterministic" ${!detIsLlm?'selected':''}>deterministic</option>
-          </select>
-        </div>
-        <div class="field" style="flex:2"><span style="font-size:.7rem;color:#6b7280">Disposition is the LLM's verdict — accept / rewrite / reject. No severity field; the verdict <em>is</em> the severity.</span></div>
-      </div>
-      <!-- LLM params -->
-      <div id="${id}-llm-params" style="${detIsLlm?'':'display:none'}">
-        <div class="field"><label>LLM Prompt</label>
-          <textarea id="${id}-prompt" rows="5" style="width:100%;background:#0f172a;border:1px solid #374151;border-radius:5px;padding:8px;color:#f9fafb;box-sizing:border-box">${esc(rule.llm_prompt||'')}</textarea>
-        </div>
-      </div>
-      <!-- Deterministic params -->
-      <div id="${id}-det-params" style="${!detIsLlm?'':'display:none'}">
-        <div class="field-row-2">
-          <div class="field"><label>Type</label>
-            <select id="${id}-dtype" onchange="onDetTypeChange('${id}')">
-              <option value="regex" ${(rule.det_type||'regex')==='regex'?'selected':''}>regex</option>
-              <option value="word_count" ${rule.det_type==='word_count'?'selected':''}>word_count</option>
-            </select>
-          </div>
-          <div class="field" id="${id}-maxwords-wrap" style="${rule.det_type==='word_count'?'':'display:none'}">
-            <label>Max words</label>
-            <input type="text" id="${id}-maxwords" value="${esc(String(rule.det_max_words||200))}">
-          </div>
-        </div>
-        <div class="field" id="${id}-patterns-wrap" style="${rule.det_type==='word_count'?'display:none':''}">
-          <label>Patterns (one regex per line)</label>
-          <textarea id="${id}-patterns" rows="4" style="width:100%;background:#0f172a;border:1px solid #374151;border-radius:5px;padding:8px;color:#f9fafb;box-sizing:border-box">${esc((rule.det_patterns||[]).join('\n'))}</textarea>
-        </div>
-      </div>
-      <div class="field"><label>Guidance (shown to Claude on violation)</label>
-        <textarea id="${id}-guidance" rows="3" style="width:100%;background:#0f172a;border:1px solid #374151;border-radius:5px;padding:8px;color:#f9fafb;box-sizing:border-box">${esc(rule.guidance||'')}</textarea>
-      </div>
-      <div class="field"><label>Rationale (internal notes)</label>
-        <textarea id="${id}-rationale" rows="2" style="width:100%;background:#0f172a;border:1px solid #374151;border-radius:5px;padding:8px;color:#f9fafb;box-sizing:border-box">${esc(rule.rationale||'')}</textarea>
-      </div>
-      <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
-        <button class="btn btn-primary" onclick="${isNew ? `saveNewRule(${fi},'${id}')` : `saveRule(${fi},${ri},'${id}')`}">Save</button>
-        <button class="btn btn-ghost" onclick="${isNew ? `cancelNewRule(${fi})` : `toggleRuleBody('${id}')`}">Cancel</button>
-        <span id="${id}-status" style="font-size:.75rem"></span>
+      <div class="rule-row-body" id="body-${id}">
+        ${renderRuleForm(fi, ri, rule, false)}
       </div>
     </div>`;
 }
 
+function renderRuleForm(fi, ri, rule, isNew) {
+  const id = isNew ? `r${fi}-new` : `r${fi}-${ri}`;
+  const detIsLlm = rule.detector === 'llm' || rule.detector === undefined;
+  const dtype = rule.det_type || 'regex';
+  return `
+      ${isNew ? `<div style="font-size:.8rem;font-weight:600;margin-bottom:12px;color:#a5b4fc">New rule</div>` : ''}
+      <div class="field-row-2">
+        <div class="field"><label>Name *</label><input type="text" id="${id}-name" value="${esc(rule.name||'')}" placeholder="kebab-case-id"></div>
+        <div class="field"><label>Description</label><input type="text" id="${id}-desc" value="${esc(rule.description||'')}" placeholder="one-line summary"></div>
+      </div>
+      <div class="field">
+        <label>Detection</label>
+        <div class="seg" role="tablist">
+          <button type="button" id="${id}-det-llm" class="${detIsLlm?'on':''}" onclick="setDetector('${id}','llm')">Ask Haiku</button>
+          <button type="button" id="${id}-det-det" class="${!detIsLlm?'on':''}" onclick="setDetector('${id}','deterministic')">Pattern match</button>
+        </div>
+        <input type="hidden" id="${id}-det" value="${detIsLlm?'llm':'deterministic'}">
+        <div style="font-size:.7rem;color:#6b7280;margin-top:6px" id="${id}-det-help">
+          ${detIsLlm
+            ? 'Haiku reads each message and decides accept / rewrite / reject against your prompt.'
+            : 'Deterministic check — patterns hint to Haiku as advisory context. Verdict still comes from Haiku.'}
+        </div>
+      </div>
+      <!-- LLM params -->
+      <div id="${id}-llm-params" style="${detIsLlm?'':'display:none'}">
+        <div class="field"><label>LLM prompt — what should Haiku flag?</label>
+          <textarea id="${id}-prompt" rows="5" style="width:100%;background:#0f172a;border:1px solid #374151;border-radius:5px;padding:8px;color:#f9fafb;box-sizing:border-box" placeholder="Is this message asking permission for work the agent could just do?">${esc(rule.llm_prompt||'')}</textarea>
+        </div>
+      </div>
+      <!-- Deterministic params -->
+      <div id="${id}-det-params" style="${!detIsLlm?'':'display:none'}">
+        <div class="field">
+          <label>Pattern type</label>
+          <div class="seg">
+            <button type="button" id="${id}-dtype-regex" class="${dtype==='regex'?'on':''}" onclick="setDetType('${id}','regex')">Regex list</button>
+            <button type="button" id="${id}-dtype-wc" class="${dtype==='word_count'?'on':''}" onclick="setDetType('${id}','word_count')">Word count</button>
+          </div>
+          <input type="hidden" id="${id}-dtype" value="${dtype}">
+        </div>
+        <div class="field" id="${id}-maxwords-wrap" style="${dtype==='word_count'?'':'display:none'}">
+          <label>Max words</label>
+          <input type="text" id="${id}-maxwords" value="${esc(String(rule.det_max_words||200))}">
+        </div>
+        <div class="field" id="${id}-patterns-wrap" style="${dtype==='word_count'?'display:none':''}">
+          <label>Regex patterns (one per line)</label>
+          <textarea id="${id}-patterns" rows="4" style="width:100%;background:#0f172a;border:1px solid #374151;border-radius:5px;padding:8px;color:#f9fafb;box-sizing:border-box" placeholder="\\b[a-f0-9]{7,}\\b">${esc((rule.det_patterns||[]).join('\n'))}</textarea>
+        </div>
+      </div>
+      <div class="field"><label>Guidance — shown to Claude on violation</label>
+        <textarea id="${id}-guidance" rows="3" style="width:100%;background:#0f172a;border:1px solid #374151;border-radius:5px;padding:8px;color:#f9fafb;box-sizing:border-box">${esc(rule.guidance||'')}</textarea>
+      </div>
+      <div class="field"><label>Rationale — internal notes (not shown to Claude)</label>
+        <textarea id="${id}-rationale" rows="2" style="width:100%;background:#0f172a;border:1px solid #374151;border-radius:5px;padding:8px;color:#f9fafb;box-sizing:border-box">${esc(rule.rationale||'')}</textarea>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+        <button class="btn btn-primary" onclick="${isNew ? `saveNewRule(${fi},'${id}')` : `saveRule(${fi},${ri},'${id}')`}">Save</button>
+        <button class="btn btn-ghost" onclick="${isNew ? `cancelNewRule(${fi})` : `toggleRuleBody('${id}')`}">${isNew?'Cancel':'Collapse'}</button>
+        <span id="${id}-status" style="font-size:.75rem"></span>
+      </div>`;
+}
+
 function toggleRuleBody(id) {
-  const body = document.getElementById('body-' + id);
-  body.classList.toggle('open');
+  const row = document.getElementById('row-' + id);
+  if (row) row.classList.toggle('open');
 }
 
-function onDetectorChange(id) {
-  const det = document.getElementById(id + '-det').value;
-  document.getElementById(id + '-llm-params').style.display = det === 'llm' ? '' : 'none';
-  document.getElementById(id + '-det-params').style.display = det === 'deterministic' ? '' : 'none';
+function setDetector(id, value) {
+  document.getElementById(id + '-det').value = value;
+  document.getElementById(id + '-det-llm').classList.toggle('on', value === 'llm');
+  document.getElementById(id + '-det-det').classList.toggle('on', value === 'deterministic');
+  document.getElementById(id + '-llm-params').style.display = value === 'llm' ? '' : 'none';
+  document.getElementById(id + '-det-params').style.display = value === 'deterministic' ? '' : 'none';
+  const help = document.getElementById(id + '-det-help');
+  if (help) help.textContent = value === 'llm'
+    ? 'Haiku reads each message and decides accept / rewrite / reject against your prompt.'
+    : 'Deterministic check — patterns hint to Haiku as advisory context. Verdict still comes from Haiku.';
 }
 
-function onDetTypeChange(id) {
-  const t = document.getElementById(id + '-dtype').value;
-  document.getElementById(id + '-patterns-wrap').style.display = t === 'word_count' ? 'none' : '';
-  document.getElementById(id + '-maxwords-wrap').style.display = t === 'word_count' ? '' : 'none';
+function setDetType(id, value) {
+  document.getElementById(id + '-dtype').value = value;
+  document.getElementById(id + '-dtype-regex').classList.toggle('on', value === 'regex');
+  document.getElementById(id + '-dtype-wc').classList.toggle('on', value === 'word_count');
+  document.getElementById(id + '-patterns-wrap').style.display = value === 'word_count' ? 'none' : '';
+  document.getElementById(id + '-maxwords-wrap').style.display = value === 'word_count' ? '' : 'none';
 }
 
 function collectRule(id) {
   const det = document.getElementById(id + '-det').value;
-  const dtype = det === 'deterministic' ? document.getElementById(id + '-dtype').value : null;
+  const dtypeEl = document.getElementById(id + '-dtype');
+  const dtype = det === 'deterministic' && dtypeEl ? dtypeEl.value : null;
   return {
     name: document.getElementById(id + '-name').value.trim(),
     description: document.getElementById(id + '-desc').value.trim(),
@@ -696,21 +707,16 @@ async function saveRule(fi, ri, id) {
 }
 
 function addRuleForm(fi) {
-  const id = `r${fi}-new`;
-  const existing = document.getElementById('body-' + id);
-  if (existing) { existing.classList.add('open'); return; }
+  const slot = document.getElementById('newrule-slot-' + fi);
+  if (!slot) return;
+  if (slot.firstChild) return; // already open
   const blankRule = { name:'', description:'', detector:'llm', guidance:'', rationale:'', llm_prompt:'', det_type:'regex', det_patterns:[], det_max_words:null };
-  const card = document.getElementById('file-' + fi);
-  const addBtn = card.querySelector('[onclick^="addRuleForm"]').parentElement;
-  const newDiv = document.createElement('div');
-  newDiv.innerHTML = renderRuleForm(fi, 'new', blankRule, true);
-  card.insertBefore(newDiv.firstElementChild, addBtn);
+  slot.innerHTML = `<div style="border-top:1px solid #1f2937;padding:14px;background:#0a0f1c">${renderRuleForm(fi, null, blankRule, true)}</div>`;
 }
 
 function cancelNewRule(fi) {
-  const id = `r${fi}-new`;
-  const el = document.getElementById('body-' + id);
-  if (el) el.parentElement.remove();
+  const slot = document.getElementById('newrule-slot-' + fi);
+  if (slot) slot.innerHTML = '';
 }
 
 async function saveNewRule(fi, id) {
@@ -749,24 +755,6 @@ function showStatus(id, msg, type) {
   el.style.color = type === 'ok' ? '#4ade80' : type === 'error' ? '#f87171' : '#9ca3af';
 }
 
-// Show rule forms when clicking a collapsed rule
-function showRuleEditor(fi, ri) {
-  const id = `r${fi}-${ri}`;
-  const body = document.getElementById('body-' + id);
-  if (body) body.classList.add('open');
-}
-
-// Make file headers clickable to expand first rule
-document.addEventListener('click', e => {
-  const header = e.target.closest('.card-header');
-  if (!header) return;
-  const card = header.parentElement;
-  const bodies = card.querySelectorAll('.card-body');
-  if (bodies.length === 0) return;
-  // Don't intercept toggle checkbox clicks
-  if (e.target.type === 'checkbox') return;
-  bodies[0].classList.toggle('open');
-});
 
 // --- Evals ---
 async function runEvals() {
@@ -859,4 +847,6 @@ def root():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=7731, log_level="info")
+    host = os.environ.get("MOP_WEB_HOST", "127.0.0.1")
+    port = int(os.environ.get("MOP_WEB_PORT", "7731"))
+    uvicorn.run(app, host=host, port=port, log_level="info")

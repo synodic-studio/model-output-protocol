@@ -15,7 +15,10 @@ API key precedence:
                           never leaks into spawned coding agents
   ANTHROPIC_API_KEY       fallback
 
-Raises RuntimeError on first call if neither is set.
+Model override:
+  MOP_HAIKU_MODEL         if set, used in place of the default Haiku model id
+
+Raises RuntimeError on first call if neither API key is set.
 """
 
 from __future__ import annotations
@@ -26,7 +29,7 @@ from typing import Awaitable, Callable
 from .rules import Rule
 from .types import EvalLLMResponse, Verdict, verdict_from_eval_response
 
-_HAIKU_MODEL = "claude-haiku-4-5-20251001"
+DEFAULT_HAIKU_MODEL = "claude-haiku-4-5-20251001"
 
 
 def _build_eval_agent():
@@ -42,7 +45,8 @@ def _build_eval_agent():
             "No API key for MOP haiku evaluator. Set MOP_ANTHROPIC_API_KEY "
             "(preferred — kept out of spawned subprocesses) or ANTHROPIC_API_KEY."
         )
-    model = AnthropicModel(_HAIKU_MODEL, provider=AnthropicProvider(api_key=api_key))
+    model_id = os.environ.get("MOP_HAIKU_MODEL", DEFAULT_HAIKU_MODEL)
+    model = AnthropicModel(model_id, provider=AnthropicProvider(api_key=api_key))
     return Agent(model, output_type=EvalLLMResponse)
 
 
