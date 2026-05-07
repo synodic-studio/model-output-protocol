@@ -52,8 +52,6 @@ def _parse_rule(r: dict) -> dict:
         "name": r.get("name", ""),
         "description": r.get("description", ""),
         "detector": r.get("detector", "llm"),
-        "severity": r.get("severity", "violation"),
-        "on_violation": r.get("on_violation", "reject"),
         "guidance": (r.get("guidance") or "").strip(),
         "rationale": (r.get("rationale") or "").strip(),
         "llm_prompt": (params.get("prompt") or "").strip() if r.get("detector") == "llm" else "",
@@ -67,8 +65,6 @@ def _rule_to_yaml_dict(rule: dict) -> dict:
     r: dict = {
         "name": rule["name"],
         "detector": rule["detector"],
-        "severity": rule["severity"],
-        "on_violation": rule["on_violation"],
     }
     if rule.get("description"):
         r["description"] = rule["description"]
@@ -115,7 +111,6 @@ def _load_files():
 
 class EvalRequest(BaseModel):
     text: str
-    backend: str = "haiku"
 
 
 class ToggleRequest(BaseModel):
@@ -374,10 +369,7 @@ select{background:#0f172a;border:1px solid #374151;border-radius:4px;padding:4px
   <div id="panel-playground" class="tab-panel active">
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">
       <span style="font-weight:600">Playground</span>
-      <select id="pg-backend">
-        <option value="stub">stub (always accept, free)</option>
-        <option value="haiku" selected>haiku (Max plan, free)</option>
-      </select>
+      <span style="font-size:.7rem;color:#9ca3af">runs your text through <code style="color:#a5b4fc">submit_message</code> against the active rules — Haiku evaluator</span>
       <button class="btn btn-ghost" onclick="loadViolations()">↑ load recent violation</button>
     </div>
     <textarea id="pg-text" rows="8" style="width:100%;background:#1f2937;border:1px solid #374151;border-radius:6px;padding:10px;color:#f9fafb;resize:vertical;box-sizing:border-box" placeholder="Paste a Claude response to test against active rules…"></textarea>
@@ -515,7 +507,7 @@ async function runEval() {
   try {
     const r = await fetch('/api/evaluate', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, backend: document.getElementById('pg-backend').value })
+      body: JSON.stringify({ text })
     });
     const d = await r.json();
     const el = document.getElementById('pg-result');
@@ -611,19 +603,7 @@ function renderRuleForm(fi, ri, rule, isNew) {
             <option value="deterministic" ${!detIsLlm?'selected':''}>deterministic</option>
           </select>
         </div>
-        <div class="field"><label>On violation</label>
-          <select id="${id}-onv">
-            <option value="reject" ${rule.on_violation==='reject'?'selected':''}>reject (retry)</option>
-            <option value="edit" ${rule.on_violation==='edit'?'selected':''}>edit (rewrite)</option>
-            <option value="warn" ${rule.on_violation==='warn'?'selected':''}>warn (log only)</option>
-          </select>
-        </div>
-        <div class="field"><label>Severity</label>
-          <select id="${id}-sev">
-            <option value="violation" ${rule.severity==='violation'?'selected':''}>violation</option>
-            <option value="warn" ${rule.severity==='warn'?'selected':''}>warn</option>
-          </select>
-        </div>
+        <div class="field" style="flex:2"><span style="font-size:.7rem;color:#6b7280">Disposition is the LLM's verdict — accept / rewrite / reject. No severity field; the verdict <em>is</em> the severity.</span></div>
       </div>
       <!-- LLM params -->
       <div id="${id}-llm-params" style="${detIsLlm?'':'display:none'}">
@@ -688,8 +668,6 @@ function collectRule(id) {
     name: document.getElementById(id + '-name').value.trim(),
     description: document.getElementById(id + '-desc').value.trim(),
     detector: det,
-    severity: document.getElementById(id + '-sev').value,
-    on_violation: document.getElementById(id + '-onv').value,
     guidance: document.getElementById(id + '-guidance').value.trim(),
     rationale: document.getElementById(id + '-rationale').value.trim(),
     llm_prompt: det === 'llm' ? document.getElementById(id + '-prompt').value.trim() : '',
@@ -721,7 +699,7 @@ function addRuleForm(fi) {
   const id = `r${fi}-new`;
   const existing = document.getElementById('body-' + id);
   if (existing) { existing.classList.add('open'); return; }
-  const blankRule = { name:'', description:'', detector:'llm', severity:'violation', on_violation:'reject', guidance:'', rationale:'', llm_prompt:'', det_type:'regex', det_patterns:[], det_max_words:null };
+  const blankRule = { name:'', description:'', detector:'llm', guidance:'', rationale:'', llm_prompt:'', det_type:'regex', det_patterns:[], det_max_words:null };
   const card = document.getElementById('file-' + fi);
   const addBtn = card.querySelector('[onclick^="addRuleForm"]').parentElement;
   const newDiv = document.createElement('div');
