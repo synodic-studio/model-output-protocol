@@ -54,3 +54,31 @@ def protocol_prompt(rules: list[Rule]) -> str:
     else:
         lines.append("ACTIVE RULES: no active rules (0 rules currently configured).")
     return "\n".join(lines)
+
+
+from .protocol import MOP
+
+
+def stop(mop: MOP) -> Gate:
+    """CC Stop hook body. Block turn-end if no message was sent this turn.
+
+    Patchbay registers this via ClaudeAgentOptions.hooks, closing over the
+    per-session MOP instance:
+
+        async def stop_hook(input, tool_use_id, context):
+            gate = stop(mop)
+            if isinstance(gate, Block):
+                return {"decision": "block", "reason": gate.reason}
+            return {}
+
+    On Allow, the sent flag is reset so the next turn starts clean.
+    """
+    if mop.sent_message_this_turn:
+        mop.sent_message_this_turn = False
+        return Allow()
+    return Block(
+        reason=(
+            "no message sent this turn — call submit_message before stopping. "
+            "If you have nothing to say, send a brief acknowledgement."
+        )
+    )
