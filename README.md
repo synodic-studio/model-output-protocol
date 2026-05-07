@@ -14,6 +14,11 @@ MOP solves it by moving voice enforcement *out* of the agent and into a thin pro
 
 ## Flow
 
+![MOP v2 flow](docs/v2-flow.svg)
+
+<details>
+<summary>Mermaid source</summary>
+
 ```mermaid
 flowchart TD
     AGENT[Coding agent] -->|"submit_message(text)"| MCP["MOP MCP tools (in-process)"]
@@ -32,6 +37,9 @@ flowchart TD
     DELIVER2 --> STOP
     FAILOPEN --> STOP
 ```
+
+Source at `docs/v2-flow.mmd`. Re-render with: `npx -y -p @mermaid-js/mermaid-cli mmdc -i docs/v2-flow.mmd -o docs/v2-flow.svg -b transparent`
+</details>
 
 ## How it works
 
