@@ -103,3 +103,100 @@ async def test_successful_send_clears_pending(
     assert isinstance(v, Accepted)
     assert mop.pending_message is None
     assert mop.justification_attempts == 0
+
+
+@pytest.mark.asyncio
+async def test_submit_justification_with_no_pending_raises(
+    accept_evaluator, deliver
+):
+    from mop.types import NoPendingMessageError
+
+    mop = MOP(rules=[], evaluator=accept_evaluator, deliver=deliver)
+    with pytest.raises(NoPendingMessageError):
+        await mop.submit_justification("any justification")
+
+
+@pytest.mark.asyncio
+async def test_justification_can_flip_rejected_to_accepted(
+    deliver, deliveries
+):
+    """First call rejects; second (with justification) accepts."""
+    calls = {"n": 0}
+
+    async def evaluator(text, regex_hints, justification):
+        calls["n"] += 1
+        if justification is None:
+            return Rejected(violations=["test-rule"])
+        return Accepted()
+
+    mop = MOP(rules=[], evaluator=evaluator, deliver=deliver)
+    v1 = await mop.submit_message("borderline")
+    assert isinstance(v1, Rejected)
+    assert mop.pending_message == "borderline"
+    assert mop.justification_attempts == 0
+    v2 = await mop.submit_justification("here's why this is fine")
+    assert isinstance(v2, Accepted)
+    assert deliveries == [("borderline", None)]
+    assert mop.pending_message is None
+    assert mop.justification_attempts == 0
+
+
+@pytest.mark.asyncio
+async def test_justification_loop_failed_open_after_cap(
+    deliver, deliveries
+):
+    """4 rejected justifications, 5th attempt failed-opens."""
+
+    async def always_reject(text, regex_hints, justification):
+        return Rejected(violations=["stubborn-rule"])
+
+    mop = MOP(
+        rules=[],
+        evaluator=always_reject,
+        deliver=deliver,
+        max_justification_attempts=4,
+    )
+    await mop.submit_message("nope")
+    assert mop.pending_message == "nope"
+
+    for i in range(4):
+        v = await mop.submit_justification(f"attempt {i + 1}")
+        assert isinstance(v, Rejected)
+        assert mop.justification_attempts == i + 1
+
+    # 5th attempt: failed-open.
+    v = await mop.submit_justification("last try")
+    assert isinstance(v, AcceptedFailedOpen)
+    assert "failed-open" in v.system_note.lower()
+
+    # Deliver was called once with the original + system note.
+    assert deliveries == [("nope", v.system_note)]
+
+    # State reset.
+    assert mop.pending_message is None
+    assert mop.justification_attempts == 0
+    assert mop.sent_message_this_turn is True
+
+
+@pytest.mark.asyncio
+async def test_replacing_pending_with_new_submit_message(
+    deliver, deliveries
+):
+    """If agent submits a fresh message instead of justifying, pending is replaced."""
+    rejections = {"first": True}
+
+    async def evaluator(text, regex_hints, justification):
+        if rejections["first"]:
+            rejections["first"] = False
+            return Rejected(violations=["r"])
+        return Accepted()
+
+    mop = MOP(rules=[], evaluator=evaluator, deliver=deliver)
+    v1 = await mop.submit_message("rejected one")
+    assert isinstance(v1, Rejected)
+    assert mop.pending_message == "rejected one"
+
+    v2 = await mop.submit_message("fresh attempt")
+    assert isinstance(v2, Accepted)
+    assert mop.pending_message is None
+    assert deliveries == [("fresh attempt", None)]
