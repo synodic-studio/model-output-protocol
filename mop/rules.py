@@ -1,0 +1,71 @@
+"""MOP rule loading and prelim regex hint collection.
+
+Rules live in YAML files under a `rules/active/` directory. v2 drops
+`severity` and `on_violation` from the runtime model — the LLM's verdict
+is the disposition. Existing YAML files with those fields still load
+fine; the fields are just ignored.
+
+Regex hints are a non-authoritative prelim pass. Any rule whose
+detector is `regex` and whose pattern matches the message contributes
+its name to the hints list. The hints feed into the LLM eval as
+context, not as an enforcing gate.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from pathlib import Path
+
+import yaml
+
+
+@dataclass(frozen=True)
+class Rule:
+    name: str
+    detector: str           # "regex" | "llm" | "word_count" (passed via parameters.type)
+    parameters: dict
+    guidance: str
+    source_file: str
+
+
+def load_rules(rules_dir: Path) -> list[Rule]:
+    """Load all rules from *.yml files in `rules_dir`. Ignores legacy fields."""
+    rules: list[Rule] = []
+    for path in sorted(rules_dir.rglob("*.yml")):
+        with path.open() as f:
+            data = yaml.safe_load(f) or {}
+        for entry in data.get("rules", []):
+            rules.append(
+                Rule(
+                    name=entry["name"],
+                    detector=entry["detector"],
+                    parameters=entry.get("parameters", {}),
+                    guidance=entry.get("guidance", ""),
+                    source_file=str(path.relative_to(rules_dir)),
+                )
+            )
+    return rules
+
+
+def collect_regex_hints(text: str, rules: list[Rule]) -> list[str]:
+    """Run all regex/word_count detectors against `text`. Return matching rule names.
+
+    These are advisory hints fed to the LLM eval as context. They are NOT
+    authoritative — the LLM may still accept text that matches a regex,
+    or rewrite/reject text that doesn't.
+    """
+    hints: list[str] = []
+    for rule in rules:
+        if rule.detector != "regex":
+            continue
+        params = rule.parameters
+        dtype = params.get("type")
+        matched = False
+        if dtype == "regex":
+            matched = any(re.search(pat, text) for pat in params.get("patterns", []))
+        elif dtype == "word_count":
+            matched = len(text.split()) > params.get("max", 0)
+        if matched:
+            hints.append(rule.name)
+    return hints
