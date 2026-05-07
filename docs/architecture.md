@@ -1,42 +1,113 @@
-# MOP Architecture — Design Notes
+# MOP Architecture
 
-Date: 2026-05-06
+Current shape (v2). See `git log` and the patchbay-relay plan at `docs/superpowers/plans/2026-05-06-mop-v2.md` for design history.
 
 ## System position
 
-MOP sits between the agent and the user on the output side. It intercepts `raw_text` after a turn completes and either passes it through, rewrites it, or triggers a retry.
+MOP sits between the agent and the user on the output side. Unlike v1 (which intercepted `raw_text` after a turn completed), v2 makes itself the *only* path to the user: the agent has no other way to reach the human.
 
 ```
-agent → [MOP eval] → user
-              ↓ (reject)
-         inject guidance → agent (resume same session)
+agent → submit_message (MCP tool) → MOP.eval → deliver(text) → user
+                                            ↘ Rejected → submit_justification loop
+                                            ↘ FailedOpen → deliver(text, system_note)
 ```
 
-Counterpart: **HOP** (`human-output-protocol`) sits on the input side.
+Counterpart on the input side: **HOP** (`human-output-protocol`).
 
 ---
 
 ## Verdict types
 
-| Verdict | Action |
-|---------|--------|
-| Accept | Pass `raw_text` to user unchanged |
-| Reject | Suppress turn, inject rule `guidance:` as new user message, retry (up to `MOP_MAX_RETRIES`) |
-| Edit | Call Haiku to rewrite `raw_text`; fall back to original if rewrite fails |
+| Verdict | Effect |
+|---|---|
+| `Accepted` | `deliver(text)` called with the original message; `pending_message` cleared; `sent_message_this_turn = True`. |
+| `Rewritten(rewritten)` | `deliver(rewritten)` called; agent sees the rewritten text in the tool result so future references resolve. |
+| `Rejected(violations)` | `pending_message = source`; agent must call `submit_justification`. No delivery. |
+| `AcceptedFailedOpen(system_note)` | After `max_justification_attempts = 4`, MOP delivers the original plus a `system_note` bubble. Burns the budget. |
 
-Structural check always runs first: empty `raw_text` → Reject regardless of rules.
+The four verdicts replace v1's three-way Accept/Reject/Edit + separate severity field. The verdict *is* the disposition.
 
 ---
 
-## Modes
+## State
 
-| Mode | Behavior |
-|------|----------|
-| `passthrough` | Bypass all evaluation |
-| `audit` | Evaluate after delivery (fire-and-forget thread), log violations to `MOP_LOG_PATH` |
-| `enforce` | Synchronous eval before delivery; Reject/Edit applied before yielding `TurnFinal` |
+Plain instance state on the in-process `MOP` object — one MOP per CC session. No cross-process coordination.
 
-Set via `MOP_MODE` env var. Default: `audit`.
+```python
+pending_message: str | None
+justification_attempts: int = 0
+sent_message_this_turn: bool = False
+max_justification_attempts: int = 4
+```
+
+The host pins the MOP instance for the lifetime of the SDK client (e.g. `SessionState.mop` in patchbay-relay) so the Stop-hook closure stays alive.
+
+---
+
+## Tools
+
+Exposed via `mop.build_mcp_server(mop)` — returns an `McpSdkServerConfig` you mount on `ClaudeAgentOptions.mcp_servers`.
+
+| Tool | Behavior |
+|---|---|
+| `submit_message(text)` | Run the LLM evaluator with regex hints. Apply the verdict. |
+| `submit_justification(reason)` | Bounded retry against `pending_message`. Failed-open on exhaustion. |
+| `get_rules(regex_filter?)` | Read-only rule listing. |
+| `get_status()` | Returns `(pending_message, sent_this_turn, justification_attempts)`. |
+
+---
+
+## Hooks
+
+| Hook | Form | Behavior |
+|---|---|---|
+| Protocol prompt | `mop.protocol_prompt(rules)` — pure function | Returns the prompt string that teaches the agent the protocol. Host concatenates into `ClaudeAgentOptions.system_prompt`. **Not** a CC `SessionStart` hook — simpler lifecycle. |
+| Stop | `mop.hooks.stop(mop)` returning `Allow \| Block(reason)` | Host registers as `ClaudeAgentOptions.hooks={"Stop": [HookMatcher(hooks=[callback])]}`. Callback closes over the MOP instance and calls `mop.hooks.stop` — blocks if `sent_message_this_turn` is False; resets on Allow. |
+
+CC plugin form of the Stop hook is deferred — it's only needed if MOP gets wired into non-SDK harnesses (cc-cli, pi).
+
+---
+
+## Host-injected callables
+
+MOP itself doesn't speak HTTP, doesn't know what an LLM provider is, and doesn't know what Telegram is. The host injects:
+
+```python
+MOP(
+    rules=rules,
+    evaluator=async_callable(text, regex_hints, justification) -> Verdict,
+    deliver=async_callable(text, system_note?) -> None,
+)
+```
+
+This keeps MOP transport-agnostic and LLM-agnostic. patchbay-relay's wiring lives in `patchbay/mop_evaluator.py` (Haiku via pydantic-ai) and `patchbay/mop_deliver.py` (Telegram).
+
+---
+
+## Wire schema
+
+`mop.types.EvalLLMResponse` is a pydantic model that LLM adapters pass to their structured-output layer (e.g. pydantic-ai's `output_type=`). `mop.types.verdict_from_eval_response()` converts the structured response back to a `Verdict`. Keeping the schema inside MOP means every adapter speaks the same wire format — no schema drift across hosts.
+
+```python
+class EvalLLMResponse(BaseModel):
+    action: Literal["accept", "rewrite", "reject"]
+    rewritten: str | None = None
+    violations: list[str] = []
+```
+
+---
+
+## Channels compatibility
+
+**Problem:** MOP delivers via discrete tool calls. Channels stream partial output as it arrives. These are mutually exclusive.
+
+**Current behavior:** `cc-sdk-mop` harness in patchbay-relay sets `supports_inflight_push=False`. Channel mode is incompatible.
+
+**Intended resolution (in priority order):**
+
+1. **Audit-only in channel mode** — stream through without blocking, log violations. Enforcement only in non-channel turns.
+2. **Streaming deterministic eval** — regex/word-count rules can fire mid-stream; LLM rules remain post-hoc.
+3. **Post-hoc correction push** — emit a Haiku-rewritten correction as a follow-up message after a violating stream completes. Weird UX; opt-in only.
 
 ---
 
@@ -44,90 +115,40 @@ Set via `MOP_MODE` env var. Default: `audit`.
 
 ```yaml
 name: rule-id
-detector: llm | deterministic
+detector: llm | regex | word_count
 parameters:
-  # llm:
-  prompt: "Does this message...?"
-  # deterministic:
-  type: regex | word_count
-  patterns: [...]     # for regex
-  max: 200            # for word_count
-severity: warn | violation
-on_violation: warn | reject | edit
-guidance: "..."       # injected on Reject
-rationale: "..."
-sunset_check: "..."   # for transitional rules only
+  prompt: "Does this message...?"   # llm
+  patterns: [...]                    # regex
+  max: 200                           # word_count
+guidance: "..."                      # surfaced to the LLM evaluator as advice
+rationale: "..."                     # human-facing
+sunset_check: "..."                  # for transitional rules
 ```
 
-Active rules in `rules/active/`. Pending (not yet activated) in `rules/pending/`.
-Start with 1–2 active rules. Promote pending rules only with audit data supporting it.
+`severity` and `on_violation` from v1 are gone — the verdict *is* the disposition.
+
+Active rules in `rules/active/`. Pending rules in `rules/pending/`. Promote with audit data.
 
 ---
 
-## Channels compatibility
+## Legacy surface (still exported)
 
-**Problem:** MOP buffers all `TextDelta` events until `TurnFinal` before evaluating. Channels stream partial output as it arrives. These are mutually exclusive.
-
-**Current behavior:** `cc-sdk-mop` harness has `supports_inflight_push=False`. Channel mode bypasses MOP.
-
-**Intended resolution (in priority order):**
-
-1. **Audit-only in channel mode** — stream through without blocking, log violations. Enforcement only in one-shot turns. Clean, no UX impact.
-2. **Streaming deterministic eval** — regex and word-count rules can fire mid-stream; fast-reject before full output lands. LLM rules remain post-hoc.
-3. **Post-hoc correction push** — after TurnFinal fires a violation in channel mode, push a Haiku-rewritten correction as a follow-up message. Weird UX; reserve for explicit opt-in.
-
-Do not buffer-then-stream in channel mode — defeats the purpose of channels.
+`mop/__init__.py` re-exports the v1 entry points (`evaluate`, `rewrite`, `MopConfig`, `Action`, `AcceptedVerdict`, `RejectedVerdict`, `RewrittenVerdict`, `TelegramMessage`, `justify`) for backward compatibility with the MOP Studio web app (`web/app.py`). The patchbay-relay integration uses only the v2 surface.
 
 ---
 
-## Standalone package strategy
+## Implementation status
 
-MOP logic is currently embedded in `patchbay-relay`. Target: extract to a pure package.
-
-```
-model-output-protocol/
-└── mop/
-    ├── eval.py     # mop.eval(text, rules) → Verdict  (pure function)
-    ├── rewrite.py  # mop.rewrite(text, guidance) → str
-    ├── rules.py    # YAML loading, rule validation
-    └── verdicts.py # Verdict dataclass
-```
-
-`patchbay-relay` becomes a thin adapter: calls `mop.eval(final.raw_text, rules)`, wraps result into harness retry logic.
-
-Benefits:
-- Testable without patchbay (`TurnRequest`/`TurnFinal` not needed in pure eval tests)
-- Reusable in any harness or CLI wrapper
-- Evals module can be used standalone for rule authoring
-
----
-
-## Stop hook
-
-`mop_stop_hook.py` (lives in `patchbay-relay/scripts/`) is a Claude Code `Stop` hook. It reads the session NDJSON transcript and blocks stopping if the last assistant turn produced no text content.
-
-Wire in `.claude/settings.json`:
-```json
-{
-  "hooks": {
-    "Stop": [{
-      "matcher": "",
-      "hooks": [{"type": "command", "command": "python3 /path/to/mop_stop_hook.py"}]
-    }]
-  }
-}
-```
-
----
-
-## Implementation status (2026-05-06)
-
-- [x] Audit mode (fire-and-forget eval, violation log)
-- [x] Enforce mode — Reject verdict (retry loop, guidance injection, `resume_session_id`)
-- [x] Enforce mode — Edit verdict (Haiku rewrite, fallback to original)
-- [x] Structural empty-message check
-- [x] Stop hook script
-- [x] 14 tests, all passing
-- [ ] Channels compatibility (audit-only in channel mode)
-- [ ] Extract to standalone package
+- [x] Verdict union, Gate, NoPendingMessageError types
+- [x] Rule loading + regex hint collection
+- [x] `protocol_prompt(rules)` system-prompt builder
+- [x] `MOP` class — submit_message, submit_justification, get_rules, get_status
+- [x] Failed-open path
+- [x] `mop.hooks.stop()` Stop-hook callable
+- [x] In-process MCP server builder
+- [x] EvalLLMResponse wire schema + verdict_from_eval_response
+- [x] patchbay-relay integration (cc-sdk-mop harness)
+- [x] Live verified end-to-end (Telegram text + photo + document paths)
+- [ ] Channels compatibility (audit-only mode)
+- [ ] CC plugin form of Stop hook (for cc-cli / pi harnesses)
 - [ ] Streaming deterministic eval in channel mode

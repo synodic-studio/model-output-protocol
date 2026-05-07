@@ -10,36 +10,48 @@ LLM agents drift. Voice rules in the system prompt get crowded out by task instr
 
 Stuffing more rules in the system prompt does not fix this. The agent's context is already saturated with the task.
 
-MOP solves it by moving voice enforcement *out* of the agent and into a thin filter layer the agent's output passes through before reaching the human.
+MOP solves it by moving voice enforcement *out* of the agent and into a thin protocol layer the agent must call to reach the human.
 
-## How it works
+## How it works (v2 — current)
 
-The agent sends a message via a `send-to-user` tool. MOP evaluates it against configured rules and returns one of three verdicts:
+MOP exposes itself to the agent as four MCP tools — typically mounted **in-process** via `claude_agent_sdk.create_sdk_mcp_server`:
 
-- **Accept** — message passes, delivered as-is.
-- **Rewrite** — message violates style rules; a fast model (Haiku) reforms it. Original + rewritten + reasons logged.
-- **Reject** — message violates behavioral rules (asking permission to do work it can do, idle praise, narrating instead of acting). Tool result returns guidance; agent must do more work before sending again.
+| Tool | Purpose |
+|---|---|
+| `submit_message(text)` | The agent's only path to the user. Triggers an LLM evaluation against the active rules. |
+| `submit_justification(reason)` | Argues for delivering a previously-rejected message. Bounded by `max_justification_attempts = 4`. |
+| `get_rules(filter?)` | Read-only — returns active rule names + descriptions, optionally filtered by regex. |
+| `get_status()` | Returns `(pending_message, sent_this_turn, justification_attempts)` for self-recovery. |
 
-The tool result *is* the delivered version, so the agent sees what the human actually saw — references like "do option b" resolve naturally in the agent's own context.
+A single Haiku call evaluates each submission and returns one of four `Verdict` types:
 
-## Modes
+- **`Accepted`** — message is delivered as-is via the host's injected `deliver(text, system_note?)` callable.
+- **`Rewritten(rewritten)`** — Haiku reformed the message; the rewritten version is delivered, and the agent learns the diff via the tool result.
+- **`Rejected(violations)`** — message becomes `pending_message`; the agent must call `submit_justification` to argue for delivery.
+- **`AcceptedFailedOpen(system_note)`** — justification budget exhausted; original is delivered with a system-note bubble warning the user that rules were bypassed.
 
-Configurable per-chat:
+A `Stop` hook gates turn-end on `sent_message_this_turn`, ensuring the agent sends *something* every turn instead of silently completing.
 
-- **Passthrough** — always Accept. Baseline, no behavior change.
-- **Audit** — log violations but always Accept. Zero-risk drift intel.
-- **Rewrite** — Haiku reforms style violations, rejects behavioral ones.
-- **StrictRetry** — reject all violations, agent must retry.
+The agent never streams text directly to the user. The MCP tool result is what the agent sees, so references like "do option b" resolve naturally in its own context.
 
-Start in Audit mode. Gather drift data. Tune rules. Promote to Rewrite when ready.
+## Integration shape
+
+MOP is transport-agnostic and LLM-agnostic. Hosts inject:
+
+- **`evaluator(text, regex_hints, justification?)`** — async callable returning a Verdict. patchbay-relay wires this to Haiku via pydantic-ai.
+- **`deliver(text, system_note?)`** — async callable that gets the message in front of the user. patchbay-relay wires this to Telegram.
+
+Plus `mop.protocol_prompt(rules)` — a pure function the host concatenates into `ClaudeAgentOptions.system_prompt` so the agent knows the protocol exists.
+
+See `mop/protocol.py` for the `MOP` class and `mop/mcp.py` for the in-process MCP wiring.
 
 ## Status
 
-Alpha. Active development. First integration target: [patchbay-relay](https://github.com/synodic-studio/patchbay-relay).
+Alpha. v2 is live in [patchbay-relay](https://github.com/synodic-studio/patchbay-relay) on the `cc-sdk-mop` harness. Legacy v1 entry points (`evaluate`, `rewrite`, `MopConfig`, `Action`) are still exported for backward compatibility with `web/app.py` (MOP Studio).
 
 ## Evals
 
-Rules are validated against a corpus of counterexamples in [`evals/`](evals/). Each rule has positive and negative example messages it should (or should not) flag. Run `uv run python evals/harness.py` to check the corpus against the deterministic rules. LLM rules are listed but skipped until the filter pipeline lands.
+Rules are validated against a corpus of counterexamples in [`evals/`](evals/). Each rule has positive and negative example messages it should (or should not) flag. Run `uv run python evals/harness.py` to check the corpus against the deterministic rules.
 
 ## Companion
 
