@@ -12,7 +12,7 @@ Stuffing more rules in the system prompt does not fix this. The agent's context 
 
 MOP solves it by moving voice enforcement *out* of the agent and into a thin protocol layer the agent must call to reach the human.
 
-## How it works (v2 — current)
+## How it works
 
 MOP exposes itself to the agent as four MCP tools — typically mounted **in-process** via `claude_agent_sdk.create_sdk_mcp_server`:
 
@@ -47,7 +47,7 @@ See `mop/protocol.py` for the `MOP` class and `mop/mcp.py` for the in-process MC
 
 ## Status
 
-Alpha. v2 is live in [patchbay-relay](https://github.com/synodic-studio/patchbay-relay) on the `cc-sdk-mop` harness. Legacy v1 entry points (`evaluate`, `rewrite`, `MopConfig`, `Action`) are still exported for backward compatibility with `web/app.py` (MOP Studio).
+Alpha. Live in [patchbay-relay](https://github.com/synodic-studio/patchbay-relay) on the `cc-sdk-mop` harness.
 
 ## Evals
 

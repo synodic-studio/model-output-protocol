@@ -1,10 +1,8 @@
 # MOP Architecture
 
-Current shape (v2). See `git log` and the patchbay-relay plan at `docs/superpowers/plans/2026-05-06-mop-v2.md` for design history.
-
 ## System position
 
-MOP sits between the agent and the user on the output side. Unlike v1 (which intercepted `raw_text` after a turn completed), v2 makes itself the *only* path to the user: the agent has no other way to reach the human.
+MOP makes itself the *only* path to the user: the agent has no other way to reach the human.
 
 ```
 agent → submit_message (MCP tool) → MOP.eval → deliver(text) → user
@@ -25,7 +23,7 @@ Counterpart on the input side: **HOP** (`human-output-protocol`).
 | `Rejected(violations)` | `pending_message = source`; agent must call `submit_justification`. No delivery. |
 | `AcceptedFailedOpen(system_note)` | After `max_justification_attempts = 4`, MOP delivers the original plus a `system_note` bubble. Burns the budget. |
 
-The four verdicts replace v1's three-way Accept/Reject/Edit + separate severity field. The verdict *is* the disposition.
+The verdict *is* the disposition — there's no separate severity or `on_violation` field.
 
 ---
 
@@ -125,15 +123,7 @@ rationale: "..."                     # human-facing
 sunset_check: "..."                  # for transitional rules
 ```
 
-`severity` and `on_violation` from v1 are gone — the verdict *is* the disposition.
-
 Active rules in `rules/active/`. Pending rules in `rules/pending/`. Promote with audit data.
-
----
-
-## Legacy surface (still exported)
-
-`mop/__init__.py` re-exports the v1 entry points (`evaluate`, `rewrite`, `MopConfig`, `Action`, `AcceptedVerdict`, `RejectedVerdict`, `RewrittenVerdict`, `TelegramMessage`, `justify`) for backward compatibility with the MOP Studio web app (`web/app.py`). The patchbay-relay integration uses only the v2 surface.
 
 ---
 

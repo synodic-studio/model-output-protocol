@@ -22,7 +22,15 @@ from pydantic import BaseModel
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from mop import Action, MopConfig, evaluate  # noqa: E402
+from mop import (  # noqa: E402
+    Accepted,
+    AcceptedFailedOpen,
+    Rejected,
+    Rewritten,
+    build_haiku_evaluator,
+    collect_regex_hints,
+    load_rules,
+)
 
 RULES_ACTIVE = REPO_ROOT / "rules" / "active"
 RULES_PENDING = REPO_ROOT / "rules" / "pending"
@@ -145,22 +153,27 @@ class AddExampleRequest(BaseModel):
 
 @app.post("/api/evaluate")
 async def api_evaluate(req: EvalRequest):
-    config = MopConfig(
-        rules_dir=RULES_ACTIVE,
-        llm_backend=req.backend,  # type: ignore[arg-type]
-    )
-    verdict = await evaluate(req.text, config)
-    result: dict = {
-        "action": verdict.action.value,
-        "rule": verdict.rule,
-        "reason": verdict.reason,
-        "guidance": verdict.guidance,
-    }
-    if verdict.action == Action.EDIT:
-        from mop import rewrite as mop_rewrite
-        result["rewritten"] = await mop_rewrite(
-            req.text, verdict.rule or "unknown", verdict.guidance or ""
-        )
+    """Run the Haiku evaluator against the active rules.
+
+    The playground bypasses MOP's stateful submit_message/justification
+    flow — there's no pending state to track, no deliver to fire. Just
+    run the evaluator once and surface the verdict shape.
+    """
+    rules = load_rules(RULES_ACTIVE)
+    evaluator = build_haiku_evaluator(rules=rules)
+    verdict = await evaluator(req.text, collect_regex_hints(req.text, rules), None)
+
+    result: dict[str, object]
+    if isinstance(verdict, Accepted):
+        result = {"action": "accept"}
+    elif isinstance(verdict, Rewritten):
+        result = {"action": "rewrite", "rewritten": verdict.rewritten}
+    elif isinstance(verdict, Rejected):
+        result = {"action": "reject", "violations": list(verdict.violations)}
+    elif isinstance(verdict, AcceptedFailedOpen):
+        result = {"action": "accept_failed_open", "system_note": verdict.system_note}
+    else:
+        result = {"action": "unknown"}
     return JSONResponse(result)
 
 
@@ -369,19 +382,19 @@ select{background:#0f172a;border:1px solid #374151;border-radius:4px;padding:4px
     </div>
     <textarea id="pg-text" rows="8" style="width:100%;background:#1f2937;border:1px solid #374151;border-radius:6px;padding:10px;color:#f9fafb;resize:vertical;box-sizing:border-box" placeholder="Paste a Claude response to test against active rules…"></textarea>
     <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
-      <button class="btn btn-primary" id="pg-run-btn" onclick="runEval()">Run evaluate()</button>
+      <button class="btn btn-primary" id="pg-run-btn" onclick="runEval()">Run submit_message()</button>
       <button class="btn btn-ghost" onclick="document.getElementById('pg-text').value='';document.getElementById('pg-result').style.display='none'">Clear</button>
     </div>
     <div id="pg-result" class="verdict" style="display:none">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
         <span id="pg-action"></span>
-        <span id="pg-rule" style="font-size:.75rem;color:#9ca3af;font-family:monospace"></span>
+        <span id="pg-violations" style="font-size:.75rem;color:#9ca3af;font-family:monospace"></span>
       </div>
-      <p id="pg-guidance" style="font-size:.85rem;color:#d1d5db;margin:0"></p>
       <div id="pg-rewrite-wrap" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid #374151">
-        <div style="font-size:.7rem;color:#fbbf24;margin-bottom:4px">Rewritten (EDIT):</div>
+        <div style="font-size:.7rem;color:#fbbf24;margin-bottom:4px">Rewritten:</div>
         <pre id="pg-rewrite" style="font-size:.8rem;background:#0f172a;border-radius:4px;padding:10px;white-space:pre-wrap;margin:0;color:#f9fafb"></pre>
       </div>
+      <p id="pg-system-note" style="display:none;font-size:.75rem;color:#fca5a5;margin:8px 0 0;font-style:italic"></p>
     </div>
     <div id="pg-violations" style="display:none;margin-top:12px">
       <div style="font-size:.7rem;color:#6b7280;margin-bottom:6px">Click to load:</div>
@@ -437,23 +450,21 @@ select{background:#0f172a;border:1px solid #374151;border-radius:4px;padding:4px
       <div id="mermaid-container">
         <div class="mermaid">
 flowchart TD
-    CC[Claude Code response text] --> EV["evaluate(text)"]
-    RULES[(rules/active/*.yml)] -.->|loaded| EV
-    EV --> LOOP{For each rule}
-    LOOP -->|deterministic| DET[regex / word_count]
-    LOOP -->|llm| HAIKU["Haiku call: accept | reject | rewrite"]
-    DET --> COLLECT[Collect violations]
-    HAIKU --> COLLECT
-    COLLECT --> NEXT{More rules?}
-    NEXT -->|yes, chain rewrites| LOOP
-    NEXT -->|no| FINAL{Any violation?}
-    FINAL -->|none| ACC[AcceptedVerdict]
-    FINAL -->|any reject| REJ["RejectedVerdict<br/>violations: list of all rule names"]
-    FINAL -->|only rewrites| REW["RewrittenVerdict<br/>rewritten: final text<br/>violations: rule names"]
-    ACC --> DELIVER([Deliver original to user])
-    REW --> DELIVER2([Deliver rewritten to user])
-    REJ --> RETRY[Retry: inject guidance, agent tries again]
-    RETRY -.->|future| JUSTIFY["justify(reason) — agent contests rejection<br/>not yet implemented"]
+    AGENT[Coding agent] -->|"submit_message(text)"| MCP["MOP MCP tools (in-process)"]
+    RULES[(rules/active/*.yml)] -.->|loaded| MCP
+    MCP --> EVAL["Haiku call: accept | rewrite | reject"]
+    HINTS["regex hints (advisory)"] -.->|context| EVAL
+    EVAL --> APPLY{"verdict"}
+    APPLY -->|Accepted| DELIVER([deliver original to user])
+    APPLY -->|Rewritten| DELIVER2([deliver rewritten to user])
+    APPLY -->|Rejected| PEND["pending_message = text<br/>agent sees violations"]
+    PEND --> JUSTIFY["submit_justification(reason)"]
+    JUSTIFY --> EVAL2["Haiku re-eval with justification"]
+    EVAL2 --> APPLY
+    JUSTIFY -.->|"after 4 attempts"| FAILOPEN["AcceptedFailedOpen:<br/>deliver original + system_note"]
+    DELIVER --> STOP["Stop hook: turn ends"]
+    DELIVER2 --> STOP
+    FAILOPEN --> STOP
         </div>
       </div>
     </div>
@@ -513,13 +524,16 @@ async function runEval() {
     const act = document.getElementById('pg-action');
     act.textContent = d.action || '';
     act.className = 'tag-' + (d.action || 'accept');
-    document.getElementById('pg-rule').textContent = d.rule || '';
-    document.getElementById('pg-guidance').textContent = d.guidance || '';
+    document.getElementById('pg-violations').textContent =
+      (d.violations && d.violations.length) ? d.violations.join(', ') : '';
     const rw = document.getElementById('pg-rewrite-wrap');
     if (d.rewritten) { rw.style.display = 'block'; document.getElementById('pg-rewrite').textContent = d.rewritten; }
     else rw.style.display = 'none';
+    const sn = document.getElementById('pg-system-note');
+    if (d.system_note) { sn.style.display = 'block'; sn.textContent = d.system_note; }
+    else sn.style.display = 'none';
   } catch(e) { alert('Eval failed: ' + e); }
-  finally { btn.textContent = 'Run evaluate()'; btn.disabled = false; }
+  finally { btn.textContent = 'Run submit_message()'; btn.disabled = false; }
 }
 
 async function loadViolations() {

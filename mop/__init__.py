@@ -1,20 +1,12 @@
 """MOP — Model Output Protocol.
 
-Evaluates agent output against active rules and rewrites violations.
+Stateful protocol library that gates an agent's user-facing output.
+Hosts construct an `MOP` instance with an injected evaluator + deliver
+callable, mount the in-process MCP server returned by `build_mcp_server`,
+and register the Stop hook via the host's runtime.
 """
 
-from .filter import (
-    Action,
-    AcceptedVerdict,
-    MopConfig,
-    RejectedVerdict,
-    RewrittenVerdict,
-    evaluate,
-    justify,
-)
-from .rewrite import TelegramMessage, rewrite
-
-# v2 protocol entry points (for patchbay's cc-sdk-mop harness).
+from .haiku import build_haiku_evaluator
 from .hooks import protocol_prompt, stop
 from .mcp import build_mcp_server, build_tool_handlers
 from .protocol import MOP
@@ -36,16 +28,15 @@ from .types import (
 )
 
 __all__ = [
-    # v2 protocol
     "MOP",
     "build_mcp_server",
     "build_tool_handlers",
+    "build_haiku_evaluator",
     "protocol_prompt",
     "stop",
     "Rule",
     "load_rules",
     "collect_regex_hints",
-    # types
     "Accepted",
     "AcceptedFailedOpen",
     "Rewritten",
@@ -59,14 +50,4 @@ __all__ = [
     "Deliver",
     "EvalLLMResponse",
     "verdict_from_eval_response",
-    # legacy (existing exports — keep)
-    "AcceptedVerdict",
-    "RejectedVerdict",
-    "RewrittenVerdict",
-    "TelegramMessage",
-    "evaluate",
-    "justify",
-    "MopConfig",
-    "Action",
-    "rewrite",
 ]
