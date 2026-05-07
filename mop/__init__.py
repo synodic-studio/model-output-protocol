@@ -9,21 +9,64 @@ from .filter import (
     MopConfig,
     RejectedVerdict,
     RewrittenVerdict,
-    Verdict,
     evaluate,
     justify,
 )
 from .rewrite import TelegramMessage, rewrite
 
+# v2 protocol entry points (for patchbay's cc-sdk-mop harness).
+from .hooks import protocol_prompt, stop
+from .mcp import build_mcp_server, build_tool_handlers
+from .protocol import MOP
+from .rules import Rule, collect_regex_hints, load_rules
+from .types import (
+    Accepted,
+    AcceptedFailedOpen,
+    Allow,
+    Block,
+    Deliver,
+    EvalLLMResponse,
+    Evaluator,
+    Gate,
+    NoPendingMessageError,
+    Rejected,
+    Rewritten,
+    Verdict,
+    verdict_from_eval_response,
+)
+
 __all__ = [
-    "Action",
+    # v2 protocol
+    "MOP",
+    "build_mcp_server",
+    "build_tool_handlers",
+    "protocol_prompt",
+    "stop",
+    "Rule",
+    "load_rules",
+    "collect_regex_hints",
+    # types
+    "Accepted",
+    "AcceptedFailedOpen",
+    "Rewritten",
+    "Rejected",
+    "Verdict",
+    "Allow",
+    "Block",
+    "Gate",
+    "NoPendingMessageError",
+    "Evaluator",
+    "Deliver",
+    "EvalLLMResponse",
+    "verdict_from_eval_response",
+    # legacy (existing exports — keep)
     "AcceptedVerdict",
-    "MopConfig",
     "RejectedVerdict",
     "RewrittenVerdict",
     "TelegramMessage",
-    "Verdict",
     "evaluate",
     "justify",
+    "MopConfig",
+    "Action",
     "rewrite",
 ]
