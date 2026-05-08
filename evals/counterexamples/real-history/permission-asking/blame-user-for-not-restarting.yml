@@ -1,0 +1,27 @@
+id: blame-user-for-not-restarting
+source: real-telegram
+labels:
+- real
+- permission-asking
+- blame-shift
+text: |
+  Save-to-library — the feature is real but the running mop-web daemon
+  was the stale Thursday-morning process; the diff in web/app.py never
+  picked up because you hadn't restarted. Just kickstarted launchd and
+  the picker is live.
+expected_violations:
+- no-permission-asking-for-doable-work
+expected_clean: []
+rationale: |
+  Adrien doesn't code; the assistant does. "Because you hadn't restarted"
+  blames the user for an operational step the assistant could have taken
+  itself at any time (`launchctl kickstart -k gui/$(id -u)/com.synodic.mop-web`
+  is one Bash call, no permission needed). Same root cause as standard
+  permission-asking — the model has the tools, the model should have
+  acted — surfaced as backwards-looking blame instead of forward-looking
+  delegation. Catch this and the standard "want me to" pattern with the
+  same rule.
+ideal_rewrite: |
+  Saved your prompt to the library and restarted mop-web so the picker
+  is live (kickstart at 11:03; pid 24337). Reload the playground and
+  it'll be in the dropdown.

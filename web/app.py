@@ -255,7 +255,11 @@ def api_evals():
 
 @app.post("/api/evals/add-example")
 def api_add_example(req: AddExampleRequest):
-    dest = EVALS_DIR / "counterexamples" / req.category / f"{req.id}.yml"
+    # category can be a single name ("voice") or a nested path ("real-history/permission-asking")
+    category_path = Path(req.category)
+    if category_path.is_absolute() or ".." in category_path.parts:
+        raise HTTPException(400, "Invalid category")
+    dest = EVALS_DIR / "counterexamples" / category_path / f"{req.id}.yml"
     if dest.exists():
         raise HTTPException(409, f"Example {req.id!r} already exists")
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -270,6 +274,35 @@ def api_add_example(req: AddExampleRequest):
     }
     dest.write_text(yaml.dump(doc, allow_unicode=True, default_flow_style=False))
     return JSONResponse({"ok": True, "path": str(dest.relative_to(REPO_ROOT))})
+
+
+@app.get("/api/library")
+def api_library():
+    """List every counterexample on disk, grouped by category, for the playground picker."""
+    root = EVALS_DIR / "counterexamples"
+    by_cat: dict[str, list[dict]] = {}
+    for path in sorted(root.rglob("*.yml")):
+        try:
+            data = yaml.safe_load(path.read_text()) or {}
+        except yaml.YAMLError:
+            continue
+        rel = path.relative_to(root)
+        category = "/".join(rel.parts[:-1]) or "uncategorized"
+        text = data.get("text", "")
+        preview = text.strip().splitlines()[0][:90] if text.strip() else ""
+        by_cat.setdefault(category, []).append({
+            "id": data.get("id", path.stem),
+            "category": category,
+            "preview": preview,
+            "text": text,
+            "expected_violations": data.get("expected_violations", []) or [],
+            "source": data.get("source", "synthetic"),
+            "labels": data.get("labels", []) or [],
+        })
+    # stable order: category name asc, id asc
+    result = [{"category": cat, "examples": sorted(items, key=lambda x: x["id"])}
+              for cat, items in sorted(by_cat.items())]
+    return JSONResponse(result)
 
 
 @app.post("/api/diagram-feedback")
@@ -371,9 +404,16 @@ select{background:#0f172a;border:1px solid #374151;border-radius:4px;padding:4px
       <span style="font-weight:600">Playground</span>
       <span style="font-size:.7rem;color:#9ca3af">runs your text through <code style="color:#a5b4fc">submit_message</code> against the active rules — Haiku evaluator</span>
     </div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+      <button class="btn btn-ghost" style="font-size:.75rem" onclick="toggleLibraryPanel()" id="pg-library-toggle">📚 Browse library <span id="pg-library-count" style="color:#6b7280;margin-left:4px"></span></button>
+      <input type="search" id="pg-library-filter" placeholder="filter by id or text…" oninput="renderLibrary()" style="flex:1;min-width:200px;background:#0f172a;border:1px solid #374151;border-radius:5px;padding:5px 10px;color:#f9fafb;font-size:.75rem;display:none">
+      <button class="btn btn-ghost" style="font-size:.7rem" onclick="loadLibrary()" title="Reload from disk">↻</button>
+    </div>
+    <div id="pg-library-panel" style="display:none;background:#0f172a;border:1px solid #374151;border-radius:6px;padding:10px;margin-bottom:8px;max-height:380px;overflow-y:auto"></div>
     <textarea id="pg-text" rows="8" style="width:100%;background:#1f2937;border:1px solid #374151;border-radius:6px;padding:10px;color:#f9fafb;resize:vertical;box-sizing:border-box" placeholder="Paste a Claude response to test against active rules…"></textarea>
-    <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+    <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
       <button class="btn btn-primary" id="pg-run-btn" onclick="runEval()">Run submit_message()</button>
+      <button class="btn btn-ghost" onclick="toggleSaveForm()">Save to library</button>
       <button class="btn btn-ghost" onclick="document.getElementById('pg-text').value='';document.getElementById('pg-result').style.display='none'">Clear</button>
     </div>
     <div id="pg-result" class="verdict" style="display:none">
@@ -386,6 +426,26 @@ select{background:#0f172a;border:1px solid #374151;border-radius:4px;padding:4px
         <pre id="pg-rewrite" style="font-size:.8rem;background:#0f172a;border-radius:4px;padding:10px;white-space:pre-wrap;margin:0;color:#f9fafb"></pre>
       </div>
       <p id="pg-system-note" style="display:none;font-size:.75rem;color:#fca5a5;margin:8px 0 0;font-style:italic"></p>
+    </div>
+
+    <!-- Save-to-library inline form (hidden by default) -->
+    <div id="pg-save-form" class="card" style="display:none;padding:14px;margin-top:14px">
+      <div style="font-size:.85rem;font-weight:500;margin-bottom:10px">Save current text as library example</div>
+      <div class="field-row">
+        <div class="field"><label>ID (kebab-case)</label><input type="text" id="pg-save-id" placeholder="describe-the-bug-fix"></div>
+        <div class="field"><label>Category</label><input type="text" id="pg-save-cat" placeholder="real-history/permission-asking" value="real-history/uncategorized"></div>
+        <div class="field"><label>Source</label><select id="pg-save-src" style="width:100%"><option value="real-sanitized">real-sanitized</option><option value="real-telegram">real-telegram</option><option value="synthetic">synthetic</option></select></div>
+      </div>
+      <div class="field-row-2">
+        <div class="field"><label>Expected violations (one per line)</label><textarea id="pg-save-violations" rows="3" style="width:100%;background:#0f172a;border:1px solid #374151;border-radius:5px;padding:6px;color:#f9fafb;box-sizing:border-box" placeholder="no-permission-asking-for-doable-work"></textarea></div>
+        <div class="field"><label>Expected clean (one per line)</label><textarea id="pg-save-clean" rows="3" style="width:100%;background:#0f172a;border:1px solid #374151;border-radius:5px;padding:6px;color:#f9fafb;box-sizing:border-box"></textarea></div>
+      </div>
+      <div class="field"><label>Rationale</label><input type="text" id="pg-save-rationale" placeholder="Why this is interesting / what it tests"></div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button class="btn btn-primary" onclick="saveToLibrary()">Save</button>
+        <button class="btn btn-ghost" onclick="toggleSaveForm()">Cancel</button>
+        <span id="pg-save-status" style="font-size:.75rem"></span>
+      </div>
     </div>
   </div>
 
@@ -491,6 +551,139 @@ function renderMermaid() {
   if (mermaidDone) return;
   mermaidDone = true;
   mermaid.run({ nodes: document.querySelectorAll('.mermaid') });
+}
+
+// --- Library picker ---
+let libraryData = [];
+async function loadLibrary() {
+  try {
+    const r = await fetch('/api/library');
+    libraryData = await r.json();
+    const total = libraryData.reduce((n, g) => n + g.examples.length, 0);
+    document.getElementById('pg-library-count').textContent = `(${total})`;
+    renderLibrary();
+  } catch(e) {
+    console.error('library load failed', e);
+    document.getElementById('pg-library-panel').innerHTML =
+      `<div style="color:#f87171;font-size:.8rem">Failed to load library: ${esc(String(e))}</div>`;
+  }
+}
+
+function toggleLibraryPanel() {
+  const panel = document.getElementById('pg-library-panel');
+  const filter = document.getElementById('pg-library-filter');
+  const open = panel.style.display === 'block';
+  panel.style.display = open ? 'none' : 'block';
+  filter.style.display = open ? 'none' : 'inline-block';
+  if (!open) renderLibrary();
+}
+
+function renderLibrary() {
+  const panel = document.getElementById('pg-library-panel');
+  const q = (document.getElementById('pg-library-filter').value || '').trim().toLowerCase();
+  if (!libraryData.length) {
+    panel.innerHTML = '<div style="color:#9ca3af;font-size:.8rem;padding:8px">Library is empty.</div>';
+    return;
+  }
+  const matches = (ex) => !q || ex.id.toLowerCase().includes(q) || ex.text.toLowerCase().includes(q)
+    || ex.expected_violations.some(v => v.toLowerCase().includes(q));
+  const html = libraryData.map(group => {
+    const items = group.examples.filter(matches);
+    if (!items.length) return '';
+    const cards = items.map(ex => {
+      const expected = ex.expected_violations.length
+        ? ex.expected_violations.map(v => `<span style="background:#2d0b0b;color:#fca5a5;font-size:.65rem;padding:1px 6px;border-radius:3px;font-family:monospace;margin-right:4px">${esc(v)}</span>`).join('')
+        : `<span style="background:#052e16;color:#4ade80;font-size:.65rem;padding:1px 6px;border-radius:3px;font-family:monospace">clean</span>`;
+      const preview = (ex.text || '').trim().slice(0, 220).replace(/\s+/g, ' ');
+      const more = (ex.text || '').length > 220 ? '…' : '';
+      const sourceBadge = `<span style="background:#1f2937;color:#9ca3af;font-size:.6rem;padding:1px 5px;border-radius:3px;font-family:monospace">${esc(ex.source)}</span>`;
+      return `<div onclick="loadLibraryExample('${esc(group.category)}','${esc(ex.id)}')" style="background:#1f2937;border:1px solid #374151;border-radius:5px;padding:8px 10px;margin-bottom:6px;cursor:pointer;transition:border-color .12s" onmouseover="this.style.borderColor='#4f46e5'" onmouseout="this.style.borderColor='#374151'">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
+          <code style="color:#a5b4fc;font-size:.75rem">${esc(ex.id)}</code>
+          ${sourceBadge}
+          ${expected}
+        </div>
+        <div style="font-size:.72rem;color:#d1d5db;line-height:1.4">${esc(preview)}${more}</div>
+      </div>`;
+    }).join('');
+    return `<div style="margin-bottom:10px">
+      <div style="font-size:.65rem;color:#6b7280;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">${esc(group.category)} <span style="color:#4b5563">(${items.length}${items.length === group.examples.length ? '' : ' / ' + group.examples.length})</span></div>
+      ${cards}
+    </div>`;
+  }).join('');
+  panel.innerHTML = html || '<div style="color:#9ca3af;font-size:.8rem;padding:8px">No matches.</div>';
+}
+
+function loadLibraryExample(cat, id) {
+  const group = libraryData.find(g => g.category === cat);
+  if (!group) return;
+  const ex = group.examples.find(x => x.id === id);
+  if (!ex) return;
+  document.getElementById('pg-text').value = ex.text;
+  const hint = ex.expected_violations.length
+    ? `Expected violations: ${ex.expected_violations.join(', ')}`
+    : 'Expected: clean';
+  const result = document.getElementById('pg-result');
+  result.style.display = 'block';
+  result.className = 'verdict accept';
+  document.getElementById('pg-action').textContent = 'loaded';
+  document.getElementById('pg-action').className = 'tag-accept';
+  document.getElementById('pg-violations').textContent = hint;
+  document.getElementById('pg-rewrite-wrap').style.display = 'none';
+  document.getElementById('pg-system-note').style.display = 'none';
+  // Close the panel after loading
+  document.getElementById('pg-library-panel').style.display = 'none';
+  document.getElementById('pg-library-filter').style.display = 'none';
+  // Scroll the textarea into view so the loaded text is obviously there
+  document.getElementById('pg-text').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function toggleSaveForm() {
+  const f = document.getElementById('pg-save-form');
+  const showing = f.style.display === 'block';
+  f.style.display = showing ? 'none' : 'block';
+  if (!showing) {
+    // suggest an ID slug from the first few words
+    const txt = document.getElementById('pg-text').value.trim();
+    if (txt && !document.getElementById('pg-save-id').value) {
+      const slug = txt.toLowerCase().match(/[a-z0-9]+/g)?.slice(0, 5).join('-').slice(0, 40) || '';
+      document.getElementById('pg-save-id').value = slug;
+    }
+  }
+}
+
+async function saveToLibrary() {
+  const id = document.getElementById('pg-save-id').value.trim();
+  const text = document.getElementById('pg-text').value.trim();
+  const cat = document.getElementById('pg-save-cat').value.trim() || 'real-history/uncategorized';
+  if (!id || !text) { alert('ID and text required.'); return; }
+  const violations = document.getElementById('pg-save-violations').value.trim().split(/\n+/).filter(Boolean);
+  const clean = document.getElementById('pg-save-clean').value.trim().split(/\n+/).filter(Boolean);
+  const status = document.getElementById('pg-save-status');
+  status.textContent = 'Saving…'; status.style.color = '#9ca3af';
+  try {
+    const r = await fetch('/api/evals/add-example', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id, text,
+        expected_violations: violations,
+        expected_clean: clean,
+        rationale: document.getElementById('pg-save-rationale').value.trim(),
+        category: cat,
+        source: document.getElementById('pg-save-src').value,
+      })
+    });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      status.textContent = e.detail || `HTTP ${r.status}`;
+      status.style.color = '#f87171';
+      return;
+    }
+    status.textContent = '✓ Saved'; status.style.color = '#4ade80';
+    ['pg-save-id','pg-save-violations','pg-save-clean','pg-save-rationale'].forEach(i => document.getElementById(i).value = '');
+    await loadLibrary();
+    setTimeout(() => { status.textContent = ''; document.getElementById('pg-save-form').style.display = 'none'; }, 1500);
+  } catch(e) { status.textContent = String(e); status.style.color = '#f87171'; }
 }
 
 // --- Playground ---
@@ -835,6 +1028,7 @@ function esc(s) {
 
 // Boot
 loadRules();
+loadLibrary();
 </script>
 </body>
 </html>"""

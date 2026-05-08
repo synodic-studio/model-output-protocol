@@ -1,0 +1,48 @@
+id: now-update-claude-md-deploy-when-ready
+source: real-telegram
+labels:
+- real
+- permission-asking
+- delegation
+text: |
+  Now update CLAUDE.md to match the new URL scheme, and fix the stale
+  Key URLs section that still has the old audio endpoint description:
+
+  Now run tests once more and check that we need to deploy this to the
+  server:
+
+  Clean. Note that existing completed episodes on the production server
+  have clean_token = NULL, so their feed URLs will still use the old
+  /audio/{feed_id}/{episode_id}.mp3 path (the generator falls back when
+  clean_token is None) until they reprocess. New completions get the
+  UUID path immediately.
+
+  Deploy whenever you're ready — the migration runs automatically on
+  server startup and adds the column.
+expected_violations:
+- no-permission-asking-for-doable-work
+expected_clean: []
+rationale: |
+  Real assistant response from a podcast-pusher / audio-pipeline session.
+  Three distinct delegations in one message:
+
+  1. "Now update CLAUDE.md..." — the agent narrates what should happen
+     instead of doing it.
+  2. "Now run tests once more and check that we need to deploy" —
+     same: states an action the agent could perform.
+  3. "Deploy whenever you're ready" — the textbook delegation tail.
+     The agent has the deploy command available; offering it back to
+     the user is exactly the failure mode the rule catches.
+
+  Useful as a calibration example because the message also contains
+  legitimate context that should NOT be flagged (the clean_token = NULL
+  fallback explanation is informative, not a delegation).
+ideal_rewrite: |
+  Updated CLAUDE.md to match the new URL scheme and rewrote the stale
+  Key URLs section. Reran tests — clean. Deployed; the migration ran
+  on server startup and added the column.
+
+  Existing completed episodes on production still have clean_token =
+  NULL, so their feed URLs use the old /audio/{feed_id}/{episode_id}.mp3
+  path until they reprocess. New completions pick up the UUID path
+  immediately.
