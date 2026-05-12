@@ -2,8 +2,6 @@
 
 from pathlib import Path
 
-import pytest
-
 from mop.rules import Rule, load_rules, collect_regex_hints
 
 
@@ -79,6 +77,64 @@ def test_collect_regex_hints_returns_matched_rule_names():
     hints = collect_regex_hints("hello \U0001f600 world this is too long", rules)
     assert "no-emojis" in hints
     assert "word-cap" in hints
+
+
+def test_load_rules_filters_inactive_by_default(tmp_path: Path):
+    """`active: false` rules are excluded from the loaded set by default."""
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    (rules_dir / "mixed.yml").write_text(
+        """
+rules:
+  - name: live-rule
+    detector: regex
+    parameters:
+      type: regex
+      patterns: ["foo"]
+    guidance: "loaded"
+  - name: dormant-rule
+    active: false
+    detector: regex
+    parameters:
+      type: regex
+      patterns: ["bar"]
+    guidance: "filtered out"
+  - name: explicit-active-rule
+    active: true
+    detector: regex
+    parameters:
+      type: regex
+      patterns: ["baz"]
+    guidance: "also loaded"
+"""
+    )
+    rules = load_rules(rules_dir)
+    names = {r.name for r in rules}
+    assert names == {"live-rule", "explicit-active-rule"}
+
+
+def test_load_rules_include_inactive_returns_everything(tmp_path: Path):
+    """`include_inactive=True` surfaces every rule for Studio-style UIs."""
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    (rules_dir / "mixed.yml").write_text(
+        """
+rules:
+  - name: live-rule
+    detector: regex
+    parameters:
+      type: regex
+      patterns: ["foo"]
+  - name: dormant-rule
+    active: false
+    detector: regex
+    parameters:
+      type: regex
+      patterns: ["bar"]
+"""
+    )
+    all_rules = load_rules(rules_dir, include_inactive=True)
+    assert {r.name for r in all_rules} == {"live-rule", "dormant-rule"}
 
 
 def test_collect_regex_hints_ignores_llm_rules():

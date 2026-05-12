@@ -1,0 +1,31 @@
+# Senior developer overlay
+#
+# Engineer who can read the diff. Cares about:
+#   - what changed (file, function, behavior)
+#   - tradeoffs taken and ones explicitly rejected
+#   - test coverage status (added, modified, gaps)
+#   - performance / security / migration implications
+# Doesn't want:
+#   - over-explanation of what the diff already shows
+#   - hand-holding through standard patterns
+#   - cheerleading praise
+#
+# Restored with `active: false` after a prior simplification pass deleted
+# the role overlay set. Enable selectively per chat/persona.
+
+rules:
+
+  - name: include-test-status
+    active: false
+    detector: llm
+    description: When code changed, state whether tests were added/run/passed
+
+  - name: surface-tradeoffs
+    active: false
+    detector: llm
+    description: When a non-obvious design choice was made, name the alternative considered
+
+  - name: skip-explaining-the-diff
+    active: false
+    detector: llm
+    description: Don't narrate what the diff plainly shows

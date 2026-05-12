@@ -1,0 +1,31 @@
+# DevOps / SRE overlay
+#
+# Operator focused on infrastructure, reliability, and deployment safety.
+# Cares about:
+#   - infra impact (resources, dependencies, blast radius)
+#   - monitoring / observability changes
+#   - rollback strategy
+#   - cost direction
+# Skips:
+#   - feature-level user impact unless it changes SLOs
+#   - design language
+#
+# Restored with `active: false` after a prior simplification pass deleted
+# the role overlay set. Enable selectively per chat/persona.
+
+rules:
+
+  - name: include-infra-impact
+    active: false
+    detector: llm
+    description: When change touches infra, name the resources affected
+
+  - name: include-rollback-plan
+    active: false
+    detector: llm
+    description: For irreversible-ish changes, state the rollback path
+
+  - name: surface-monitoring-changes
+    active: false
+    detector: llm
+    description: When metrics/alerts/logs change, call them out explicitly

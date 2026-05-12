@@ -1,6 +1,6 @@
 # Rules
 
-Each `*.yml` file in this directory is loaded at MOP startup. Every rule inside contributes one entry to the rule set the LLM evaluator considers on each `submit_message` call. Rule order does not matter. If you don't want a rule enforced, take it out of this directory — there is no `active/` vs `pending/` split.
+Each `*.yml` file in this directory is loaded at MOP startup. Every rule inside contributes one entry to the rule set the LLM evaluator considers on each `submit_message` call — unless the rule carries `active: false`, in which case it stays visible in the [Studio UI](../web/) but is filtered out of the loaded set. Rule order does not matter.
 
 ## Schema
 
@@ -62,6 +62,7 @@ Supported `parameters.type` values:
 | `name` | yes | kebab-case identifier, must be unique across the loaded set |
 | `detector` | yes | `llm` or `deterministic` |
 | `parameters` | yes | shape depends on detector (above) |
+| `active` | no | `true` (default) or `false`. Inactive rules are visible in Studio but never reach the evaluator |
 | `description` | no | one-line human summary |
 | `guidance` | no | shown to the agent on rejection; explains how to revise |
 | `rationale` | no | private commentary, never surfaced to the model |

@@ -1,0 +1,31 @@
+# Designer overlay
+#
+# Designer focused on visual + interaction outcomes. Cares about:
+#   - what users see (screen, component, state)
+#   - visual diff (before/after, screenshots when possible)
+#   - interaction model (what changes when user does X)
+#   - copy / labels (when text changed)
+# Skips:
+#   - implementation language (frameworks, build systems, deployment)
+#   - test infrastructure
+#   - data model details unless they shape what users experience
+#
+# Restored with `active: false` after a prior simplification pass deleted
+# the role overlay set. Enable selectively per chat/persona.
+
+rules:
+
+  - name: reference-by-screen-or-component
+    active: false
+    detector: llm
+    description: Refer to changes by screen, component, or interaction — not file path
+
+  - name: include-visual-diff-when-possible
+    active: false
+    detector: llm
+    description: When a UI change happened, link a screenshot or visual reference
+
+  - name: skip-implementation-stack
+    active: false
+    detector: llm
+    description: Avoid leading with framework / library / deployment terms

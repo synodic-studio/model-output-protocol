@@ -54,6 +54,9 @@ def _parse_rule(r: dict) -> dict:
         "name": r.get("name", ""),
         "description": r.get("description", ""),
         "detector": r.get("detector", "llm"),
+        # `active` defaults to True when the field is missing — matches
+        # mop.rules._entry_is_active so the loader and UI stay in sync.
+        "active": bool(r.get("active", True)),
         "guidance": (r.get("guidance") or "").strip(),
         "rationale": (r.get("rationale") or "").strip(),
         "llm_prompt": (params.get("prompt") or "").strip() if r.get("detector") == "llm" else "",
@@ -69,6 +72,10 @@ def _rule_to_yaml_dict(rule: dict) -> dict:
         "name": rule["name"],
         "detector": rule["detector"],
     }
+    # Persist `active` only when explicitly False so the on-disk shape
+    # stays minimal for the default (active) case.
+    if rule.get("active") is False:
+        r["active"] = False
     if rule.get("description"):
         r["description"] = rule["description"]
     if rule["detector"] == "llm":
@@ -90,7 +97,12 @@ def _rule_to_yaml_dict(rule: dict) -> dict:
 
 
 def _load_files():
-    """List every *.yml file directly under rules/ (flat, one folder)."""
+    """List every *.yml file directly under rules/ (flat, one folder).
+
+    Returns both active and inactive rules so the Studio UI can render
+    inactive ones with a toggle. The evaluator path (`load_rules` without
+    `include_inactive`) is the only place that filters.
+    """
     if not RULES_DIR.exists():
         return []
     files = []
@@ -156,6 +168,12 @@ class TestOneRuleRequest(BaseModel):
 class DeleteRuleRequest(BaseModel):
     file_path: str
     rule_name: str
+
+
+class ToggleActiveRequest(BaseModel):
+    file_path: str
+    rule_name: str
+    active: bool
 
 
 class GeneralFeedbackRequest(BaseModel):
@@ -246,7 +264,16 @@ def api_save_rule(req: SaveRuleRequest):
     data = yaml.safe_load(path.read_text()) if path.exists() else {}
     data = data or {}
     rules = data.get("rules", [])
-    new_dict = _rule_to_yaml_dict(req.rule)
+    # Preserve the existing `active` flag across an edit. The rule editor
+    # form doesn't expose `active` (the per-rule toggle is its own
+    # endpoint) so we'd otherwise wipe `active: false` on every save.
+    incoming = dict(req.rule)
+    if "active" not in incoming or incoming.get("active") is None:
+        for existing in rules:
+            if existing.get("name") == req.original_name:
+                incoming["active"] = bool(existing.get("active", True))
+                break
+    new_dict = _rule_to_yaml_dict(incoming)
     for i, r in enumerate(rules):
         if r.get("name") == req.original_name:
             rules[i] = new_dict
@@ -345,6 +372,35 @@ def api_library():
     result = [{"category": cat, "examples": sorted(items, key=lambda x: x["id"])}
               for cat, items in sorted(by_cat.items())]
     return JSONResponse(result)
+
+
+@app.post("/api/rules/toggle-active")
+def api_toggle_active(req: ToggleActiveRequest):
+    """Flip a single rule's `active` flag in its source YAML file.
+
+    The flag controls whether `load_rules()` returns the rule to the
+    evaluator. Inactive rules stay visible in the Studio UI so the user
+    can edit, test, or re-activate them later.
+    """
+    path = REPO_ROOT / req.file_path
+    path.resolve().relative_to(REPO_ROOT.resolve())
+    if not path.exists():
+        raise HTTPException(404, "File not found")
+    data = yaml.safe_load(path.read_text()) or {}
+    rules = data.get("rules", [])
+    target = next((r for r in rules if r.get("name") == req.rule_name), None)
+    if target is None:
+        raise HTTPException(404, f"Rule {req.rule_name!r} not found in {req.file_path}")
+    if req.active:
+        # Default is active; drop the field to keep YAML minimal.
+        target.pop("active", None)
+    else:
+        target["active"] = False
+    data["rules"] = rules
+    path.write_text(
+        yaml.dump(data, allow_unicode=True, default_flow_style=False, sort_keys=False, indent=2)
+    )
+    return JSONResponse({"ok": True, "active": req.active})
 
 
 @app.post("/api/rules/delete-rule")
@@ -453,6 +509,8 @@ textarea,input,select{font-family:ui-monospace,monospace;font-size:.8rem}
 .card-body{border-top:1px solid #1f2937;padding:14px;display:none}
 .card-body.open{display:block}
 .rule-row{border-top:1px solid #1f2937}
+.rule-row-inactive .rule-row-header{opacity:.55}
+.rule-row-inactive .rule-row-header .rule-name-wrap span:first-child{text-decoration:line-through}
 .rule-row-header{display:flex;align-items:center;gap:10px;padding:8px 14px;cursor:pointer;user-select:none}
 .rule-row-header:hover{background:#0f172a}
 .rule-row-header .chev{color:#6b7280;font-size:.75rem;transition:transform .15s;display:inline-block;width:10px}
@@ -1170,18 +1228,55 @@ function renderRuleRow(fi, ri, rule) {
   const det = rule.detector || 'llm';
   const detLabel = det === 'llm' ? 'LLM' : (rule.det_type === 'word_count' ? 'WORD COUNT' : 'REGEX');
   const detClass = det === 'llm' ? 'llm' : 'det';
+  const active = rule.active !== false;
+  const stateBadge = active
+    ? '<span class="badge-active">active</span>'
+    : '<span class="badge-pending">inactive</span>';
+  // Toggle is its own click target — stopPropagation prevents the row
+  // from expanding/collapsing when the user just wants to flip the flag.
+  const toggle = `
+    <label class="toggle-wrap" title="${active ? 'Active — evaluator loads this rule' : 'Inactive — visible but not loaded'}" onclick="event.stopPropagation()">
+      <input type="checkbox" ${active ? 'checked' : ''} onchange="toggleRuleActive(${fi},${ri},this.checked,this)">
+      <span class="toggle-track"><span class="toggle-thumb"></span></span>
+    </label>`;
   return `
-    <div class="rule-row" id="row-${id}">
+    <div class="rule-row ${active ? '' : 'rule-row-inactive'}" id="row-${id}">
       <div class="rule-row-header" onclick="toggleRuleBody('${id}')">
         <span class="chev">▶</span>
         ${copyableName(rule.name)}
         <span class="det-pill ${detClass}">${detLabel}</span>
+        ${stateBadge}
         <span style="font-size:.7rem;color:#6b7280;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(rule.description || '')}</span>
+        ${toggle}
       </div>
       <div class="rule-row-body" id="body-${id}">
         ${renderRuleForm(fi, ri, rule, false)}
       </div>
     </div>`;
+}
+
+async function toggleRuleActive(fi, ri, active, inputEl) {
+  const file = rulesData[fi];
+  const rule = file.rules[ri];
+  const prev = rule.active !== false;
+  try {
+    const r = await fetch('/api/rules/toggle-active', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_path: file.path, rule_name: rule.name, active })
+    });
+    if (!r.ok) {
+      inputEl.checked = prev;
+      const e = await r.json().catch(() => ({}));
+      alert('Toggle failed: ' + (e.detail || r.status));
+      return;
+    }
+    rule.active = active;
+    // Re-render so badge + row tint update without losing scroll position.
+    renderRules();
+  } catch(e) {
+    inputEl.checked = prev;
+    alert('Toggle failed: ' + e);
+  }
 }
 
 function renderRuleForm(fi, ri, rule, isNew) {

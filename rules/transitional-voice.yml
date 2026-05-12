@@ -1,0 +1,75 @@
+rules:
+- name: length-cap-chat
+  active: false
+  detector: deterministic
+  description: Chat messages over ~200 words should be moved to a document
+  parameters:
+    type: word_count
+    max: 200
+  rationale: 'Current models trained with verbose-output rewards. Chat is for short
+
+    interactions; longer content overwhelms mobile readers and is better
+
+    delivered as a linked document.
+
+    '
+- name: no-cheerleading-phrases
+  detector: deterministic
+  description: Empty praise patterns ("Great job!", "You're absolutely right!")
+  parameters:
+    type: regex
+    patterns:
+    - (?i)\bgreat (job|work|question|catch)\b
+    - (?i)\bexcellent (work|job|question)\b
+    - (?i)\b(absolutely|totally) (right|correct)\b
+    - (?i)\bwhat a (great|good) (idea|question)\b
+  rationale: 'Current RLHF training rewards effusive acknowledgment. The praise
+
+    reads as sycophantic to most users. Models will likely train this
+
+    out as user preference data accumulates against it.
+
+    '
+  active: false
+- name: no-trailing-summary
+  active: false
+  detector: llm
+  description: Don't restate what was just done if the user can see the result
+  parameters:
+    prompt: 'Does this message end with a summary of what was just done, when
+
+      the user has direct access to the result (diff, file, output)?
+
+      Examples: "I''ve now updated the config and added the import."
+
+      after the user already sees the diff.
+
+      '
+  rationale: 'Trailing summaries are filler when the user can see the work
+
+    directly. They double the message length without adding information.
+
+    Current models default to summaries due to training that rewards
+
+    explicit recap.
+
+    '
+- name: no-process-narration
+  active: false
+  detector: llm
+  description: State outcomes, don't narrate the process
+  parameters:
+    prompt: 'Does this message describe what the agent is *about to do* or
+
+      *just did* in process terms ("Now I''ll check...", "Let me run...",
+
+      "I''m going to...") rather than reporting the result?
+
+      '
+  rationale: 'Current models narrate process as a habit from chat-style training.
+
+    Narration is appropriate before an action; not after. Once the
+
+    action is done, report the outcome.
+
+    '

@@ -1,8 +1,11 @@
 """MOP rule loading and prelim regex hint collection.
 
-Rules live in YAML files under a flat `rules/` directory. The LLM's
-verdict is the disposition; legacy `severity` and `on_violation` fields
-on a rule are silently ignored if present.
+Rules live in YAML files under a flat `rules/` directory. Each rule may
+carry an `active: true|false` flag (default `true`). `load_rules()`
+returns only active rules — inactive rules are visible in the Studio UI
+but never reach the evaluator. The LLM's verdict is the disposition;
+legacy `severity` and `on_violation` fields on a rule are silently
+ignored if present.
 
 Regex hints are a non-authoritative prelim pass. Any rule whose
 detector is `regex` and whose pattern matches the message contributes
@@ -28,13 +31,27 @@ class Rule:
     source_file: str
 
 
-def load_rules(rules_dir: Path) -> list[Rule]:
-    """Load all rules from *.yml files in `rules_dir`. Ignores legacy fields."""
+def _entry_is_active(entry: dict) -> bool:
+    """Whether a YAML rule entry is active. Missing `active:` defaults to True."""
+    return bool(entry.get("active", True))
+
+
+def load_rules(rules_dir: Path, *, include_inactive: bool = False) -> list[Rule]:
+    """Load rules from *.yml files in `rules_dir`.
+
+    By default, only rules with `active: true` (or no `active` field) are
+    returned. Pass `include_inactive=True` to get every rule regardless
+    of flag — useful for the Studio UI which wants to surface inactive
+    rules so users can toggle them on. Ignores legacy `severity` /
+    `on_violation` fields.
+    """
     rules: list[Rule] = []
     for path in sorted(rules_dir.rglob("*.yml")):
         with path.open() as f:
             data = yaml.safe_load(f) or {}
         for entry in data.get("rules", []):
+            if not include_inactive and not _entry_is_active(entry):
+                continue
             rules.append(
                 Rule(
                     name=entry["name"],

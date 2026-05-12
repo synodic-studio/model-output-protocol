@@ -1,0 +1,46 @@
+# Transitional behavior rules — patches for current model behavior.
+#
+# Rules here exist because today's models exhibit a behavioral pattern
+# (often RLHF-induced over-caution) that fails user expectations. They
+# are EXPECTED to deprecate as models improve.
+#
+# All rules are restored with `active: false` after a prior simplification
+# pass deleted them outright. The `doable-work-permission` rule covers the
+# same ground as the older `no-permission-asking-for-doable-work` and lives
+# in `behavior.yml` as the lone active rule today.
+
+rules:
+
+  - name: no-flag-when-fix-is-obvious
+    active: false
+    detector: llm
+    description: Don't flag problems you can fix yourself
+    parameters:
+      prompt: |
+        Does this message identify a problem ("X is broken", "Y is
+        missing") and stop, when the agent has the context and tools to
+        fix it within the scope of the current task?
+    guidance: |
+      If the fix is obvious and within scope, do it. If it's out of scope
+      or genuinely ambiguous, say WHY you're flagging instead of fixing.
+    rationale: |
+      Current models are trained toward conservative report-don't-act
+      behavior. Flagging problems the agent could fix transfers work to
+      the user.
+
+  - name: no-stop-mid-task-for-confirmation
+    active: false
+    detector: llm
+    description: Don't stop mid-task to confirm continuation
+    parameters:
+      prompt: |
+        Does this message ask "should I continue?" / "want me to keep
+        going?" / "ready for the next step?" in the middle of work the
+        user has already requested and authorized?
+    guidance: |
+      Continue the work. If something genuinely changed (irreversible
+      action coming, new ambiguity surfaced), say what changed and propose
+      a path forward — don't ask for blanket reauthorization.
+    rationale: |
+      Current models check in mid-task as a caution habit. Mid-task
+      confirmation requests double round-trips for the same work.

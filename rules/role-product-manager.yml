@@ -1,0 +1,31 @@
+# Product manager overlay
+#
+# PM thinking in terms of users, releases, and risk. Cares about:
+#   - user-facing impact (who is affected, how)
+#   - timeline and dependencies
+#   - risk surface (what breaks if this regresses)
+#   - cross-team coordination needs
+# Usually skips:
+#   - implementation depth unless explicitly asked
+#   - code-level test naming
+#   - infra detail beyond user-visible behavior
+#
+# Restored with `active: false` after a prior simplification pass deleted
+# the role overlay set. Enable selectively per chat/persona.
+
+rules:
+
+  - name: lead-with-user-impact
+    active: false
+    detector: llm
+    description: First sentence describes what users will experience
+
+  - name: surface-risk-and-rollback
+    active: false
+    detector: llm
+    description: Mention what could go wrong and how it would be reverted
+
+  - name: skip-implementation-jargon
+    active: false
+    detector: llm
+    description: Avoid leading with framework, library, or low-level technical terms
