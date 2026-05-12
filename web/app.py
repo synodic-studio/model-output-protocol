@@ -33,12 +33,12 @@ from mop import (  # noqa: E402
     collect_regex_hints,
     load_rules,
 )
+from mop.rules import Rule  # noqa: E402
 
 RULES_DIR = Path(os.environ.get("MOP_RULES_DIR", REPO_ROOT / "rules"))
-RULES_ACTIVE = RULES_DIR / "active"
-RULES_PENDING = RULES_DIR / "pending"
 EVALS_DIR = Path(os.environ.get("MOP_EVALS_DIR", REPO_ROOT / "evals"))
 FEEDBACK_FILE = Path(os.environ.get("MOP_FEEDBACK_FILE", REPO_ROOT / "web" / "diagram-feedback.txt"))
+SUBMISSIONS_DIR = Path(os.environ.get("MOP_SUBMISSIONS_DIR", REPO_ROOT / "submissions"))
 
 app = FastAPI(title="MOP Studio")
 
@@ -60,6 +60,7 @@ def _parse_rule(r: dict) -> dict:
         "det_type": det_type,
         "det_patterns": params.get("patterns", []),
         "det_max_words": params.get("max"),
+        "canonical_example": (r.get("canonical_example") or "").strip(),
     }
 
 
@@ -83,27 +84,27 @@ def _rule_to_yaml_dict(rule: dict) -> dict:
         r["guidance"] = rule["guidance"]
     if rule.get("rationale"):
         r["rationale"] = rule["rationale"]
+    if rule.get("canonical_example"):
+        r["canonical_example"] = rule["canonical_example"]
     return r
 
 
 def _load_files():
+    """List every *.yml file directly under rules/ (flat, one folder)."""
+    if not RULES_DIR.exists():
+        return []
     files = []
-    for status, dirpath in [("active", RULES_ACTIVE), ("pending", RULES_PENDING)]:
-        if not dirpath.exists():
-            continue
-        for path in sorted(dirpath.rglob("*.yml")):
-            content = path.read_text()
-            try:
-                data = yaml.safe_load(content) or {}
-                parsed_rules = [_parse_rule(r) for r in data.get("rules", [])]
-            except Exception:
-                parsed_rules = []
-            files.append({
-                "path": str(path.relative_to(REPO_ROOT)),
-                "status": status,
-                "filename": path.name,
-                "rules": parsed_rules,
-            })
+    for path in sorted(RULES_DIR.glob("*.yml")):
+        try:
+            data = yaml.safe_load(path.read_text()) or {}
+            parsed_rules = [_parse_rule(r) for r in data.get("rules", [])]
+        except Exception:
+            parsed_rules = []
+        files.append({
+            "path": str(path.relative_to(REPO_ROOT)),
+            "filename": path.name,
+            "rules": parsed_rules,
+        })
     return files
 
 
@@ -113,10 +114,6 @@ def _load_files():
 
 class EvalRequest(BaseModel):
     text: str
-
-
-class ToggleRequest(BaseModel):
-    path: str
 
 
 class SaveRuleRequest(BaseModel):
@@ -144,6 +141,28 @@ class AddExampleRequest(BaseModel):
     source: str = "real-sanitized"
 
 
+class SubmissionRequest(BaseModel):
+    offending_text: str
+    feedback: str
+    verdict: Literal["reject", "rewrite", "accept"]
+    desired_rule_name: str = ""
+
+
+class TestOneRuleRequest(BaseModel):
+    rule: dict
+    text: str
+
+
+class DeleteRuleRequest(BaseModel):
+    file_path: str
+    rule_name: str
+
+
+class GeneralFeedbackRequest(BaseModel):
+    feedback: str
+    context: str = ""
+
+
 # ---------------------------------------------------------------------------
 # API
 # ---------------------------------------------------------------------------
@@ -156,7 +175,7 @@ async def api_evaluate(req: EvalRequest):
     flow — there's no pending state to track, no deliver to fire. Just
     run the evaluator once and surface the verdict shape.
     """
-    rules = load_rules(RULES_ACTIVE)
+    rules = load_rules(RULES_DIR)
     evaluator = build_haiku_evaluator(rules=rules)
     verdict = await evaluator(req.text, collect_regex_hints(req.text, rules), None)
 
@@ -179,20 +198,43 @@ def api_rules():
     return JSONResponse(_load_files())
 
 
-@app.post("/api/rules/toggle")
-def api_toggle(req: ToggleRequest):
-    path = REPO_ROOT / req.path
-    path.resolve().relative_to(REPO_ROOT.resolve())
-    if not path.exists():
-        raise HTTPException(404, "File not found")
-    if path.resolve().parent == RULES_ACTIVE.resolve():
-        dest_dir, new_status = RULES_PENDING, "pending"
+@app.post("/api/rules/test-one")
+async def api_rules_test_one(req: TestOneRuleRequest):
+    """Run the Haiku evaluator against a single rule and a piece of text.
+
+    Lets the user sanity-check a rule in isolation — does it fire on its
+    canonical example? Does it fire on text it shouldn't?
+    """
+    rule_dict = req.rule
+    detector = rule_dict.get("detector", "llm")
+    if detector == "llm":
+        params = {"prompt": rule_dict.get("llm_prompt", "")}
+    elif detector == "deterministic":
+        dtype = rule_dict.get("det_type", "regex")
+        if dtype == "word_count":
+            params = {"type": "word_count", "max": rule_dict.get("det_max_words") or 200}
+        else:
+            params = {"type": "regex", "patterns": rule_dict.get("det_patterns") or []}
     else:
-        dest_dir, new_status = RULES_ACTIVE, "active"
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    dest = dest_dir / path.name
-    path.rename(dest)
-    return JSONResponse({"new_status": new_status, "new_path": str(dest.relative_to(REPO_ROOT))})
+        params = {}
+    one_rule = Rule(
+        name=rule_dict.get("name", "test-rule"),
+        detector=detector,
+        parameters=params,
+        guidance=rule_dict.get("guidance", ""),
+        source_file="<test>",
+    )
+    evaluator = build_haiku_evaluator(rules=[one_rule])
+    verdict = await evaluator(req.text, collect_regex_hints(req.text, [one_rule]), None)
+    if isinstance(verdict, Accepted):
+        return JSONResponse({"action": "accept"})
+    if isinstance(verdict, Rewritten):
+        return JSONResponse({"action": "rewrite", "rewritten": verdict.rewritten})
+    if isinstance(verdict, Rejected):
+        return JSONResponse({"action": "reject", "violations": list(verdict.violations)})
+    if isinstance(verdict, AcceptedFailedOpen):
+        return JSONResponse({"action": "accept_failed_open", "system_note": verdict.system_note})
+    return JSONResponse({"action": "unknown"})
 
 
 @app.post("/api/rules/save-rule")
@@ -305,6 +347,79 @@ def api_library():
     return JSONResponse(result)
 
 
+@app.post("/api/rules/delete-rule")
+def api_delete_rule(req: DeleteRuleRequest):
+    """Remove a named rule from a YAML file. The file itself is kept even
+    if it becomes empty (so the category dir isn't accidentally cleaned)."""
+    path = REPO_ROOT / req.file_path
+    path.resolve().relative_to(REPO_ROOT.resolve())
+    if not path.exists():
+        raise HTTPException(404, "File not found")
+    data = yaml.safe_load(path.read_text()) or {}
+    rules = data.get("rules", [])
+    new_rules = [r for r in rules if r.get("name") != req.rule_name]
+    if len(new_rules) == len(rules):
+        raise HTTPException(404, f"Rule {req.rule_name!r} not found in {req.file_path}")
+    data["rules"] = new_rules
+    path.write_text(
+        yaml.dump(data, allow_unicode=True, default_flow_style=False, sort_keys=False, indent=2)
+    )
+    return JSONResponse({"ok": True, "remaining": len(new_rules)})
+
+
+@app.post("/api/feedback")
+def api_general_feedback(req: GeneralFeedbackRequest):
+    """General-purpose feedback box. Appended to web/feedback.txt with timestamp + context."""
+    if not req.feedback.strip():
+        raise HTTPException(400, "feedback required")
+    dest = REPO_ROOT / "web" / "feedback.txt"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with dest.open("a") as f:
+        f.write(f"\n--- {datetime.now().isoformat(timespec='seconds')} ---\n")
+        if req.context:
+            f.write(f"[context: {req.context}]\n")
+        f.write(req.feedback.rstrip() + "\n")
+    return JSONResponse({"ok": True, "path": str(dest.relative_to(REPO_ROOT))})
+
+
+@app.post("/api/submissions")
+def api_submit(req: SubmissionRequest):
+    """Save a rule-candidate submission for later triage.
+
+    A submission is a real offending response plus Adrien's verdict and what
+    should have happened. Stored as a timestamped YAML in submissions/ so it
+    can later be turned into either a rule, a counterexample, or both.
+    """
+    if not req.offending_text.strip() or not req.feedback.strip():
+        raise HTTPException(400, "offending_text and feedback required")
+    SUBMISSIONS_DIR.mkdir(parents=True, exist_ok=True)
+    now = datetime.now()
+    ts = now.strftime("%Y%m%d-%H%M%S")
+    # Slug from desired rule name if given, else from feedback first words
+    slug_src = req.desired_rule_name.strip() or req.feedback.strip()
+    slug_parts: list[str] = []
+    for token in slug_src.lower().split():
+        cleaned = "".join(ch for ch in token if ch.isalnum())
+        if cleaned:
+            slug_parts.append(cleaned)
+        if len(slug_parts) >= 5:
+            break
+    slug = "-".join(slug_parts)[:40] or "submission"
+    filename = f"{ts}-{slug}.yml"
+    dest = SUBMISSIONS_DIR / filename
+    doc = {
+        "id": f"{ts}-{slug}",
+        "created_at": now.isoformat(timespec="seconds"),
+        "verdict": req.verdict,
+        "desired_rule_name": req.desired_rule_name.strip() or None,
+        "offending_text": req.offending_text,
+        "feedback": req.feedback,
+        "status": "new",
+    }
+    dest.write_text(yaml.dump(doc, allow_unicode=True, default_flow_style=False, sort_keys=False))
+    return JSONResponse({"ok": True, "path": str(dest.relative_to(REPO_ROOT))})
+
+
 @app.post("/api/diagram-feedback")
 def api_feedback(req: FeedbackRequest):
     FEEDBACK_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -381,15 +496,20 @@ textarea,input,select{font-family:ui-monospace,monospace;font-size:.8rem}
 select{background:#0f172a;border:1px solid #374151;border-radius:4px;padding:4px 8px;color:#f9fafb}
 .det-llm{}.det-det{}
 .mermaid svg{max-width:100%}
+.copy-btn{display:inline-flex;align-items:center;justify-content:center;background:transparent;border:none;color:#6b7280;cursor:pointer;padding:0 4px;font-size:.85rem;line-height:1;border-radius:3px;vertical-align:middle}
+.copy-btn:hover{color:#a5b4fc;background:#1f2937}
+.copy-btn.copied{color:#4ade80}
+.rule-name-wrap{display:inline-flex;align-items:center;gap:2px}
 </style>
 </head>
 <body>
 
 <header style="background:#111827;border-bottom:1px solid #1f2937;padding:10px 20px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:10">
   <span style="font-weight:700;font-size:.95rem">MOP Studio</span>
-  <div style="display:flex;gap:4px">
-    <button class="tab-btn active" onclick="switchTab('playground')">playground</button>
+  <div style="display:flex;gap:4px;flex-wrap:wrap">
+    <button class="tab-btn active" onclick="switchTab('submit')">submit</button>
     <button class="tab-btn" onclick="switchTab('rules')">rules</button>
+    <button class="tab-btn" onclick="switchTab('playground')">playground</button>
     <button class="tab-btn" onclick="switchTab('evals')">evals</button>
     <button class="tab-btn" onclick="switchTab('diagram')">diagram</button>
   </div>
@@ -398,8 +518,48 @@ select{background:#0f172a;border:1px solid #374151;border-radius:4px;padding:4px
 
 <main style="max-width:900px;margin:0 auto;padding:20px 16px">
 
+  <!-- SUBMIT -->
+  <div id="panel-submit" class="tab-panel active">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+      <span style="font-weight:600">Submit a rule candidate</span>
+      <span style="font-size:.7rem;color:#9ca3af">paste a bad response · describe the fix · pick a verdict · saved to <code style="color:#a5b4fc">submissions/</code> for triage</span>
+    </div>
+
+    <div class="field">
+      <label>Offending response</label>
+      <textarea id="sub-text" rows="10" style="width:100%;background:#1f2937;border:1px solid #374151;border-radius:6px;padding:10px;color:#f9fafb;resize:vertical;box-sizing:border-box;font-family:ui-monospace,monospace;font-size:.8rem" placeholder="Paste the actual model output that was wrong…"></textarea>
+    </div>
+
+    <div class="field">
+      <label>What was wrong — and what should have happened instead</label>
+      <textarea id="sub-feedback" rows="6" style="width:100%;background:#1f2937;border:1px solid #374151;border-radius:6px;padding:10px;color:#f9fafb;resize:vertical;box-sizing:border-box;font-family:ui-monospace,monospace;font-size:.8rem" placeholder="e.g. Asked permission for a doable task. Should have just done the task and reported back."></textarea>
+    </div>
+
+    <div class="field">
+      <label>Verdict — what MOP should have done with this output</label>
+      <div class="seg" role="tablist" id="sub-verdict-seg">
+        <button type="button" id="sub-v-reject" class="on" onclick="setSubmitVerdict('reject')">Reject</button>
+        <button type="button" id="sub-v-rewrite" onclick="setSubmitVerdict('rewrite')">Rewrite</button>
+        <button type="button" id="sub-v-accept" onclick="setSubmitVerdict('accept')">Accept (counterexample)</button>
+      </div>
+      <input type="hidden" id="sub-verdict" value="reject">
+      <div id="sub-verdict-help" style="font-size:.7rem;color:#6b7280;margin-top:6px">Reject = MOP should have blocked the message and demanded a justification.</div>
+    </div>
+
+    <div class="field">
+      <label>Desired rule name <span style="color:#6b7280;text-transform:none;font-weight:400">— optional, kebab-case</span></label>
+      <input type="text" id="sub-rule-name" placeholder="no-permission-asking-for-doable-work">
+    </div>
+
+    <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+      <button class="btn btn-primary" id="sub-submit-btn" onclick="submitCandidate()">Save submission</button>
+      <button class="btn btn-ghost" onclick="clearSubmitForm()">Clear</button>
+      <span id="sub-status" style="font-size:.75rem"></span>
+    </div>
+  </div>
+
   <!-- PLAYGROUND -->
-  <div id="panel-playground" class="tab-panel active">
+  <div id="panel-playground" class="tab-panel">
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">
       <span style="font-weight:600">Playground</span>
       <span style="font-size:.7rem;color:#9ca3af">runs your text through <code style="color:#a5b4fc">submit_message</code> against the active rules — Haiku evaluator</span>
@@ -453,7 +613,7 @@ select{background:#0f172a;border:1px solid #374151;border-radius:4px;padding:4px
   <div id="panel-rules" class="tab-panel">
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">
       <span style="font-weight:600">Rules</span>
-      <span style="font-size:.75rem;color:#6b7280">Toggle = active ↔ pending</span>
+      <span style="font-size:.75rem;color:#6b7280">every <code style="color:#a5b4fc">rules/*.yml</code> file is loaded at runtime</span>
       <button class="btn btn-ghost" style="margin-left:auto" onclick="loadRules()">↻ refresh</button>
     </div>
     <div id="rules-loading" style="color:#6b7280;font-size:.85rem;display:none">Loading…</div>
@@ -462,30 +622,19 @@ select{background:#0f172a;border:1px solid #374151;border-radius:4px;padding:4px
 
   <!-- EVALS -->
   <div id="panel-evals" class="tab-panel">
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">
       <span style="font-weight:600">Evals</span>
-      <button class="btn btn-primary" id="evals-run-btn" onclick="runEvals()">Run harness</button>
-      <span style="font-size:.75rem;color:#6b7280">deterministic only · LLM rules skipped</span>
+      <span style="font-size:.7rem;color:#9ca3af">existing counterexamples on disk · click one to expand · use "test" to run it through active rules</span>
+      <button class="btn btn-primary" style="margin-left:auto" id="evals-run-btn" onclick="runEvals()">Run harness</button>
+      <button class="btn btn-ghost" style="font-size:.75rem" onclick="loadEvalsLibrary()">↻ refresh</button>
     </div>
-    <div id="evals-result" style="display:none;margin-bottom:16px"></div>
-    <div class="card" style="padding:16px">
-      <div style="font-size:.85rem;font-weight:500;margin-bottom:12px">Add counterexample</div>
-      <div class="field-row">
-        <div class="field"><label>ID (kebab-case)</label><input type="text" id="ex-id" placeholder="my-example"></div>
-        <div class="field"><label>Category</label><select id="ex-cat" style="width:100%"><option>behavior</option><option>voice</option></select></div>
-        <div class="field"><label>Source</label><select id="ex-src" style="width:100%"><option value="real-sanitized">real-sanitized</option><option value="synthetic">synthetic</option></select></div>
-      </div>
-      <div class="field"><label>Text</label><textarea id="ex-text" rows="4" style="width:100%;background:#0f172a;border:1px solid #374151;border-radius:5px;padding:8px;color:#f9fafb;box-sizing:border-box" placeholder="The message to classify…"></textarea></div>
-      <div class="field-row-2">
-        <div class="field"><label>Expected violations (one per line)</label><textarea id="ex-violations" rows="3" style="width:100%;background:#0f172a;border:1px solid #374151;border-radius:5px;padding:6px;color:#f9fafb;box-sizing:border-box" placeholder="no-permission-asking-for-doable-work"></textarea></div>
-        <div class="field"><label>Expected clean (one per line)</label><textarea id="ex-clean" rows="3" style="width:100%;background:#0f172a;border:1px solid #374151;border-radius:5px;padding:6px;color:#f9fafb;box-sizing:border-box"></textarea></div>
-      </div>
-      <div class="field"><label>Rationale</label><input type="text" id="ex-rationale"></div>
-      <div style="display:flex;align-items:center;gap:8px">
-        <button class="btn btn-primary" onclick="addExample()">Add example</button>
-        <span id="ex-status" style="font-size:.75rem"></span>
-      </div>
+    <div id="evals-result" style="display:none;margin-bottom:14px"></div>
+    <div id="evals-cats" style="display:flex;gap:2px;flex-wrap:wrap;border-bottom:1px solid #1f2937;padding-bottom:8px;margin-bottom:12px"></div>
+    <div style="margin-bottom:10px">
+      <input type="search" id="evals-filter" placeholder="filter by id / text / violation…" oninput="renderEvalsLibrary()" style="width:100%;background:#0f172a;border:1px solid #374151;border-radius:5px;padding:6px 10px;color:#f9fafb;font-size:.8rem;box-sizing:border-box">
     </div>
+    <div id="evals-loading" style="color:#6b7280;font-size:.85rem;display:none">Loading…</div>
+    <div id="evals-list"></div>
   </div>
 
   <!-- DIAGRAM -->
@@ -498,7 +647,7 @@ select{background:#0f172a;border:1px solid #374151;border-radius:4px;padding:4px
         <div class="mermaid">
 flowchart TD
     AGENT[Coding agent] -->|"submit_message(text)"| MCP["MOP MCP tools (in-process)"]
-    RULES[(rules/active/*.yml)] -.->|loaded| MCP
+    RULES[(rules/*.yml)] -.->|loaded| MCP
     MCP --> EVAL["Haiku call: accept | rewrite | reject"]
     HINTS["regex hints (advisory)"] -.->|context| EVAL
     EVAL --> APPLY{"verdict"}
@@ -528,6 +677,21 @@ flowchart TD
 
 </main>
 
+<!-- Floating feedback widget — visible on every tab -->
+<div id="fb-fab" onclick="toggleGlobalFeedback()" style="position:fixed;right:18px;bottom:18px;width:48px;height:48px;border-radius:9999px;background:#4f46e5;color:#fff;display:flex;align-items:center;justify-content:center;font-size:1.3rem;cursor:pointer;box-shadow:0 6px 16px rgba(0,0,0,.4);z-index:50" title="Send feedback to Claude">💬</div>
+<div id="fb-panel" style="display:none;position:fixed;right:18px;bottom:78px;width:min(360px,92vw);background:#111827;border:1px solid #374151;border-radius:10px;padding:14px;box-shadow:0 10px 30px rgba(0,0,0,.5);z-index:50">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+    <span style="font-weight:600;font-size:.9rem">Feedback to Claude</span>
+    <button class="btn btn-ghost" style="font-size:1rem;padding:2px 8px" onclick="toggleGlobalFeedback()" title="Close">×</button>
+  </div>
+  <p style="font-size:.7rem;color:#9ca3af;margin:0 0 8px">Anything you want to tell the coding agent about this page. Saved to <code style="color:#a5b4fc">web/feedback.txt</code>.</p>
+  <textarea id="fb-text" rows="5" style="width:100%;background:#0f172a;border:1px solid #374151;border-radius:5px;padding:8px;color:#f9fafb;resize:vertical;box-sizing:border-box;font-family:ui-monospace,monospace;font-size:.8rem" placeholder="e.g. The evals tab is bad. Make this change instead…"></textarea>
+  <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+    <button class="btn btn-primary" onclick="sendGlobalFeedback()">Send</button>
+    <span id="fb-global-status" style="font-size:.75rem"></span>
+  </div>
+</div>
+
 <script>
 // --- Tab switching ---
 function switchTab(name, fromInit) {
@@ -537,6 +701,7 @@ function switchTab(name, fromInit) {
   document.querySelector('.tab-btn[onclick*=\'' + name + '\']').classList.add('active');
   if (!fromInit) localStorage.setItem('mop-tab', name);
   if (name === 'rules' && !rulesLoaded) loadRules();
+  if (name === 'evals' && !evalsData.length) loadEvalsLibrary();
   if (name === 'diagram') setTimeout(renderMermaid, 50);
 }
 (function() {
@@ -551,6 +716,242 @@ function renderMermaid() {
   if (mermaidDone) return;
   mermaidDone = true;
   mermaid.run({ nodes: document.querySelectorAll('.mermaid') });
+}
+
+// --- Clipboard / copy-name helper ---
+function copyName(btn, name) {
+  // event.stopPropagation handled inline on the button click
+  const fallback = () => {
+    const ta = document.createElement('textarea');
+    ta.value = name; ta.setAttribute('readonly','');
+    ta.style.position='absolute'; ta.style.left='-9999px';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); } catch(_) {}
+    document.body.removeChild(ta);
+  };
+  const done = () => {
+    btn.classList.add('copied');
+    const orig = btn.textContent;
+    btn.textContent = '✓';
+    setTimeout(() => { btn.classList.remove('copied'); btn.textContent = orig; }, 1200);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(name).then(done).catch(() => { fallback(); done(); });
+  } else { fallback(); done(); }
+}
+
+function copyableName(name, extraStyle) {
+  const safe = esc(name);
+  const style = extraStyle || 'font-family:monospace;font-size:.8rem;font-weight:600';
+  return `<span class="rule-name-wrap"><span style="${style}">${safe}</span>` +
+    `<button class="copy-btn" title="Copy rule name" onclick="event.stopPropagation();copyName(this,'${safe.replace(/'/g, "\\'")}')">⧉</button></span>`;
+}
+
+// --- Global feedback widget ---
+function toggleGlobalFeedback() {
+  const p = document.getElementById('fb-panel');
+  p.style.display = p.style.display === 'block' ? 'none' : 'block';
+}
+async function sendGlobalFeedback() {
+  const text = document.getElementById('fb-text').value.trim();
+  const status = document.getElementById('fb-global-status');
+  if (!text) { status.textContent = 'Empty.'; status.style.color = '#f87171'; return; }
+  status.textContent = 'Sending…'; status.style.color = '#9ca3af';
+  // Capture current tab as context so Claude knows where the gripe came from.
+  const activeTab = document.querySelector('.tab-btn.active');
+  const context = activeTab ? activeTab.textContent.trim() : '';
+  try {
+    const r = await fetch('/api/feedback', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feedback: text, context })
+    });
+    if (!r.ok) { status.textContent = 'Failed'; status.style.color = '#f87171'; return; }
+    status.textContent = '✓ Sent'; status.style.color = '#4ade80';
+    document.getElementById('fb-text').value = '';
+    setTimeout(() => {
+      status.textContent = '';
+      document.getElementById('fb-panel').style.display = 'none';
+    }, 1200);
+  } catch(e) { status.textContent = String(e); status.style.color = '#f87171'; }
+}
+
+// --- Evals library browser (replaces the heavy add-example form) ---
+let evalsData = [];
+let evalsActiveCat = '__all__';
+
+async function loadEvalsLibrary() {
+  document.getElementById('evals-loading').style.display = 'block';
+  try {
+    const r = await fetch('/api/library');
+    evalsData = await r.json();
+    renderEvalsCats();
+    renderEvalsLibrary();
+  } catch(e) {
+    document.getElementById('evals-list').innerHTML =
+      `<div style="color:#f87171;font-size:.85rem">Failed to load: ${esc(String(e))}</div>`;
+  } finally {
+    document.getElementById('evals-loading').style.display = 'none';
+  }
+}
+
+function renderEvalsCats() {
+  const total = evalsData.reduce((n, g) => n + g.examples.length, 0);
+  const cats = [['__all__', 'all', total], ...evalsData.map(g => [g.category, g.category, g.examples.length])];
+  document.getElementById('evals-cats').innerHTML = cats.map(([key, label, n]) => `
+    <button class="tab-btn ${key === evalsActiveCat ? 'active' : ''}"
+            onclick="setEvalsCat('${esc(key)}')">${esc(label)} <span style="color:#6b7280;font-size:.7rem">(${n})</span></button>`).join('');
+}
+
+function setEvalsCat(key) {
+  evalsActiveCat = key;
+  renderEvalsCats();
+  renderEvalsLibrary();
+}
+
+function renderEvalsLibrary() {
+  const list = document.getElementById('evals-list');
+  const q = (document.getElementById('evals-filter').value || '').trim().toLowerCase();
+  const matches = (ex) => !q || ex.id.toLowerCase().includes(q) || (ex.text || '').toLowerCase().includes(q)
+    || ex.expected_violations.some(v => v.toLowerCase().includes(q));
+  const groups = evalsActiveCat === '__all__' ? evalsData : evalsData.filter(g => g.category === evalsActiveCat);
+  if (!groups.length) { list.innerHTML = '<div style="color:#9ca3af;font-size:.85rem">No examples.</div>'; return; }
+  const html = groups.map(group => {
+    const items = group.examples.filter(matches);
+    if (!items.length) return '';
+    const cards = items.map(ex => {
+      const expected = ex.expected_violations.length
+        ? ex.expected_violations.map(v => `<span style="background:#2d0b0b;color:#fca5a5;font-size:.65rem;padding:1px 6px;border-radius:3px;font-family:monospace;margin-right:4px;display:inline-flex;align-items:center">${esc(v)}<button class="copy-btn" style="margin-left:2px;color:#fca5a5" onclick="event.stopPropagation();copyName(this,'${esc(v)}')">⧉</button></span>`).join('')
+        : `<span style="background:#052e16;color:#4ade80;font-size:.65rem;padding:1px 6px;border-radius:3px;font-family:monospace">clean</span>`;
+      const previewSrc = (ex.text || '').trim();
+      const preview = previewSrc.length > 240 ? previewSrc.slice(0, 240) + '…' : previewSrc;
+      return `<div style="background:#1f2937;border:1px solid #374151;border-radius:5px;padding:10px 12px;margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+          <code style="color:#a5b4fc;font-size:.75rem;display:inline-flex;align-items:center">${esc(ex.id)}<button class="copy-btn" onclick="event.stopPropagation();copyName(this,'${esc(ex.id)}')">⧉</button></code>
+          <span style="background:#1f2937;color:#9ca3af;font-size:.6rem;padding:1px 5px;border-radius:3px;font-family:monospace">${esc(ex.source || 'synthetic')}</span>
+          ${expected}
+        </div>
+        <pre style="font-size:.75rem;color:#d1d5db;line-height:1.45;background:#0f172a;padding:8px;border-radius:4px;margin:0 0 6px;white-space:pre-wrap">${esc(preview)}</pre>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-ghost" style="font-size:.7rem" onclick='testEvalExample(${JSON.stringify(ex.text).replace(/'/g, "&#39;")}, ${JSON.stringify(ex.expected_violations).replace(/'/g, "&#39;")}, this)'>Test against active rules</button>
+          <button class="btn btn-ghost" style="font-size:.7rem" onclick="loadEvalIntoPlayground(${JSON.stringify(ex.text).replace(/'/g, '&#39;')})">Open in playground</button>
+        </div>
+        <div class="verdict ex-result" style="display:none;margin-top:8px"></div>
+      </div>`;
+    }).join('');
+    return `<div style="margin-bottom:14px">
+      <div style="font-size:.65rem;color:#6b7280;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">${esc(group.category)} <span style="color:#4b5563">(${items.length}${items.length === group.examples.length ? '' : ' / ' + group.examples.length})</span></div>
+      ${cards}
+    </div>`;
+  }).join('');
+  list.innerHTML = html || '<div style="color:#9ca3af;font-size:.85rem">No matches.</div>';
+}
+
+async function testEvalExample(text, expectedVios, btn) {
+  const result = btn.parentElement.parentElement.querySelector('.ex-result');
+  result.style.display = 'block';
+  result.className = 'verdict';
+  result.innerHTML = '<span style="color:#9ca3af;font-size:.8rem">Running active rules…</span>';
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/evaluate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    });
+    const d = await r.json();
+    const action = d.action || 'unknown';
+    const cls = action === 'accept' ? 'accept' : action === 'reject' ? 'reject' : 'edit';
+    const tag = action === 'accept' ? 'tag-accept' : action === 'reject' ? 'tag-reject' : 'tag-edit';
+    const actualVios = d.violations || [];
+    // Match = (expected empty AND actual empty AND accept) OR (expected sorted == actual sorted)
+    const expSorted = [...expectedVios].sort().join(',');
+    const actSorted = [...actualVios].sort().join(',');
+    const match = expSorted === actSorted && (expSorted.length > 0 ? action === 'reject' : action === 'accept');
+    const matchBadge = match
+      ? '<span style="background:#052e16;color:#4ade80;font-size:.65rem;padding:1px 6px;border-radius:3px;font-family:monospace">match ✓</span>'
+      : '<span style="background:#1c1400;color:#fbbf24;font-size:.65rem;padding:1px 6px;border-radius:3px;font-family:monospace">mismatch</span>';
+    result.className = 'verdict ' + cls;
+    let inner = `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="${tag}">${esc(action)}</span>${matchBadge}`;
+    if (actualVios.length) inner += `<span style="font-size:.7rem;color:#9ca3af;font-family:monospace">${esc(actualVios.join(', '))}</span>`;
+    inner += '</div>';
+    if (expectedVios.length) inner += `<div style="font-size:.65rem;color:#6b7280;margin-top:4px">expected: ${esc(expectedVios.join(', ') || 'clean')}</div>`;
+    if (d.rewritten) inner += `<pre style="font-size:.75rem;background:#0f172a;border-radius:4px;padding:8px;margin:6px 0 0;white-space:pre-wrap">${esc(d.rewritten)}</pre>`;
+    result.innerHTML = inner;
+  } catch(e) {
+    result.className = 'verdict reject';
+    result.innerHTML = `<span class="tag-reject">error</span> <span style="color:#9ca3af;font-size:.75rem">${esc(String(e))}</span>`;
+  } finally { btn.disabled = false; }
+}
+
+function loadEvalIntoPlayground(text) {
+  switchTab('playground');
+  const ta = document.getElementById('pg-text');
+  if (ta) { ta.value = text; ta.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
+}
+
+// --- Submit tab ---
+const SUBMIT_VERDICT_HELP = {
+  reject: 'Reject = MOP should have blocked the message and demanded a justification.',
+  rewrite: 'Rewrite = MOP should have silently rewritten the response to a cleaner form.',
+  accept: 'Accept = this output is actually fine and should pass — use for counterexamples / good cases.',
+};
+function setSubmitVerdict(v) {
+  document.getElementById('sub-verdict').value = v;
+  ['reject','rewrite','accept'].forEach(x => {
+    const btn = document.getElementById('sub-v-' + x);
+    if (btn) btn.classList.toggle('on', x === v);
+  });
+  const help = document.getElementById('sub-verdict-help');
+  if (help) help.textContent = SUBMIT_VERDICT_HELP[v] || '';
+}
+
+function clearSubmitForm() {
+  ['sub-text','sub-feedback','sub-rule-name'].forEach(i => document.getElementById(i).value = '');
+  setSubmitVerdict('reject');
+  const s = document.getElementById('sub-status');
+  s.textContent = '';
+}
+
+async function submitCandidate() {
+  const offending = document.getElementById('sub-text').value.trim();
+  const feedback = document.getElementById('sub-feedback').value.trim();
+  const verdict = document.getElementById('sub-verdict').value;
+  const ruleName = document.getElementById('sub-rule-name').value.trim();
+  const status = document.getElementById('sub-status');
+  if (!offending) { status.textContent = 'Offending response is required.'; status.style.color = '#f87171'; return; }
+  if (!feedback) { status.textContent = 'Feedback is required.'; status.style.color = '#f87171'; return; }
+  const btn = document.getElementById('sub-submit-btn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  status.textContent = ''; status.style.color = '#9ca3af';
+  try {
+    const r = await fetch('/api/submissions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        offending_text: offending,
+        feedback: feedback,
+        verdict: verdict,
+        desired_rule_name: ruleName,
+      })
+    });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      status.textContent = e.detail || `HTTP ${r.status}`;
+      status.style.color = '#f87171';
+      return;
+    }
+    const d = await r.json();
+    status.textContent = `✓ Saved to ${d.path}`;
+    status.style.color = '#4ade80';
+    clearSubmitForm();
+    // Re-show the success message after clearSubmitForm wiped it
+    status.textContent = `✓ Saved to ${d.path}`;
+    status.style.color = '#4ade80';
+    setTimeout(() => { status.textContent = ''; }, 5000);
+  } catch(e) {
+    status.textContent = String(e);
+    status.style.color = '#f87171';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Save submission';
+  }
 }
 
 // --- Library picker ---
@@ -592,7 +993,7 @@ function renderLibrary() {
     if (!items.length) return '';
     const cards = items.map(ex => {
       const expected = ex.expected_violations.length
-        ? ex.expected_violations.map(v => `<span style="background:#2d0b0b;color:#fca5a5;font-size:.65rem;padding:1px 6px;border-radius:3px;font-family:monospace;margin-right:4px">${esc(v)}</span>`).join('')
+        ? ex.expected_violations.map(v => `<span style="background:#2d0b0b;color:#fca5a5;font-size:.65rem;padding:1px 6px;border-radius:3px;font-family:monospace;margin-right:4px;display:inline-flex;align-items:center">${esc(v)}<button class="copy-btn" style="color:#fca5a5;margin-left:2px" onclick="event.stopPropagation();copyName(this,'${esc(v)}')">⧉</button></span>`).join('')
         : `<span style="background:#052e16;color:#4ade80;font-size:.65rem;padding:1px 6px;border-radius:3px;font-family:monospace">clean</span>`;
       const preview = (ex.text || '').trim().slice(0, 220).replace(/\s+/g, ' ');
       const more = (ex.text || '').length > 220 ? '…' : '';
@@ -704,8 +1105,14 @@ async function runEval() {
     const act = document.getElementById('pg-action');
     act.textContent = d.action || '';
     act.className = 'tag-' + (d.action || 'accept');
-    document.getElementById('pg-violations').textContent =
-      (d.violations && d.violations.length) ? d.violations.join(', ') : '';
+    const violEl = document.getElementById('pg-violations');
+    if (d.violations && d.violations.length) {
+      violEl.innerHTML = d.violations.map(v =>
+        `<span style="display:inline-flex;align-items:center;margin-right:8px">${esc(v)}<button class="copy-btn" onclick="copyName(this,'${esc(v)}')">⧉</button></span>`
+      ).join('');
+    } else {
+      violEl.textContent = '';
+    }
     const rw = document.getElementById('pg-rewrite-wrap');
     if (d.rewritten) { rw.style.display = 'block'; document.getElementById('pg-rewrite').textContent = d.rewritten; }
     else rw.style.display = 'none';
@@ -732,20 +1139,19 @@ async function loadRules() {
 
 function renderRules() {
   const list = document.getElementById('rules-list');
+  if (!rulesData.length) {
+    list.innerHTML = '<div style="color:#9ca3af;font-size:.85rem">No rule files in rules/.</div>';
+    return;
+  }
   list.innerHTML = rulesData.map((file, fi) => {
     const ruleCount = file.rules.length;
     const ruleLabel = ruleCount === 1 ? '1 rule' : `${ruleCount} rules`;
     return `
-    <div class="card ${file.status === 'active' ? 'active-rule' : ''}" id="file-${fi}">
+    <div class="card active-rule" id="file-${fi}">
       <div class="card-header">
-        <label class="toggle-wrap" title="${file.status === 'active' ? 'Active — used at runtime' : 'Pending — staged but not enforced'}">
-          <input type="checkbox" ${file.status === 'active' ? 'checked' : ''} onchange="toggleFile(${fi})">
-          <div class="toggle-track"><div class="toggle-thumb"></div></div>
-        </label>
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
             <span style="font-family:monospace;font-size:.85rem">${esc(file.filename)}</span>
-            <span class="${file.status === 'active' ? 'badge-active' : 'badge-pending'}">${file.status}</span>
             <span style="font-size:.7rem;color:#6b7280">${ruleLabel}</span>
           </div>
         </div>
@@ -768,7 +1174,7 @@ function renderRuleRow(fi, ri, rule) {
     <div class="rule-row" id="row-${id}">
       <div class="rule-row-header" onclick="toggleRuleBody('${id}')">
         <span class="chev">▶</span>
-        <span style="font-family:monospace;font-size:.8rem;font-weight:600">${esc(rule.name)}</span>
+        ${copyableName(rule.name)}
         <span class="det-pill ${detClass}">${detLabel}</span>
         <span style="font-size:.7rem;color:#6b7280;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(rule.description || '')}</span>
       </div>
@@ -928,19 +1334,6 @@ async function saveNewRule(fi, id) {
   } catch(e) { showStatus(id, String(e), 'error'); }
 }
 
-async function toggleFile(fi) {
-  try {
-    const r = await fetch('/api/rules/toggle', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: rulesData[fi].path })
-    });
-    const d = await r.json();
-    rulesData[fi].status = d.new_status;
-    rulesData[fi].path = d.new_path;
-    renderRules();
-  } catch(e) { alert('Toggle failed: ' + e); }
-}
-
 function showStatus(id, msg, type) {
   const el = document.getElementById(id + '-status');
   if (!el) return;
@@ -1036,7 +1429,15 @@ loadLibrary();
 
 @app.get("/", response_class=HTMLResponse)
 def root():
-    return HTML
+    # Aggressive no-cache so iPad Safari doesn't serve stale UI after edits.
+    return HTMLResponse(
+        HTML,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 if __name__ == "__main__":

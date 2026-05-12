@@ -123,7 +123,7 @@ rationale: "..."                     # human-facing
 sunset_check: "..."                  # for transitional rules
 ```
 
-Active rules in `rules/active/`. Pending rules in `rules/pending/`. Promote with audit data.
+Rules live in a flat `rules/` directory and are loaded at startup. To stage a draft rule without enforcing it, keep it out of `rules/` (e.g. in a notes file outside the directory or behind a feature flag in your fork).
 
 ---
 

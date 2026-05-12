@@ -59,8 +59,7 @@ rules are listed but skipped (they require Haiku in the loop). A
 
 ## Adding new rules
 
-When you add a rule to `rules/core/*.yml` or `rules/transitional/*.yml`,
-also add at least:
+When you add a rule to `rules/*.yml`, also add at least:
 - One counterexample that should trigger it (positive case)
 - One clean example that should NOT trigger it (negative case, control)
 

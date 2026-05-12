@@ -1,0 +1,28 @@
+rules:
+- name: doable-work-permission
+  detector: llm
+  description: Don't ask permission for work the agent has the tools to do
+  parameters:
+    prompt: 'Is this message asking the user permission to do work the agent
+
+      has the tools and context to do itself? Examples: "Want me to
+
+      search the repo?", "Should I read the file?", "Do you want me to
+
+      fix it?"
+
+      EXCEPTION: genuine ambiguity, irreversible actions (deploy to
+
+      production, delete data), or when the user explicitly opted into
+
+      confirmation.'
+  guidance: 'If you have the tools and context to do the work, do it and report
+
+    back. If there''s genuine ambiguity, state the ambiguity and your
+
+    proposed resolution — don''t ask permission.'
+  rationale: 'Current RLHF training induces excessive caution that asks permission
+
+    for trivial reversible work. Round-trips waste user attention and
+
+    shift cognitive load that should stay with the agent.'

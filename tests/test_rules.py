@@ -8,7 +8,7 @@ from mop.rules import Rule, load_rules, collect_regex_hints
 
 
 def test_load_rules_from_yaml(tmp_path: Path):
-    rules_dir = tmp_path / "active"
+    rules_dir = tmp_path / "rules"
     rules_dir.mkdir()
     (rules_dir / "style.yml").write_text(
         """
@@ -36,8 +36,8 @@ rules:
 
 
 def test_load_rules_ignores_severity_and_on_violation(tmp_path: Path):
-    """v2 drops severity and on_violation from the runtime model."""
-    rules_dir = tmp_path / "active"
+    """Legacy `severity` / `on_violation` fields on a rule are silently dropped."""
+    rules_dir = tmp_path / "rules"
     rules_dir.mkdir()
     (rules_dir / "legacy.yml").write_text(
         """
@@ -54,7 +54,7 @@ rules:
     )
     rules = load_rules(rules_dir)
     assert len(rules) == 1
-    # severity / on_violation are NOT attributes on the v2 Rule dataclass
+    # severity / on_violation are NOT attributes on the Rule dataclass
     assert not hasattr(rules[0], "severity")
     assert not hasattr(rules[0], "on_violation")
 

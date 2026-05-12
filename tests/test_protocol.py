@@ -130,12 +130,12 @@ async def test_justification_can_flip_rejected_to_accepted(
         return Accepted()
 
     mop = MOP(rules=[], evaluator=evaluator, deliver=deliver)
-    v1 = await mop.submit_message("borderline")
-    assert isinstance(v1, Rejected)
+    verdict1 = await mop.submit_message("borderline")
+    assert isinstance(verdict1, Rejected)
     assert mop.pending_message == "borderline"
     assert mop.justification_attempts == 0
-    v2 = await mop.submit_justification("here's why this is fine")
-    assert isinstance(v2, Accepted)
+    verdict2 = await mop.submit_justification("here's why this is fine")
+    assert isinstance(verdict2, Accepted)
     assert deliveries == [("borderline", None)]
     assert mop.pending_message is None
     assert mop.justification_attempts == 0
@@ -192,11 +192,11 @@ async def test_replacing_pending_with_new_submit_message(
         return Accepted()
 
     mop = MOP(rules=[], evaluator=evaluator, deliver=deliver)
-    v1 = await mop.submit_message("rejected one")
-    assert isinstance(v1, Rejected)
+    verdict1 = await mop.submit_message("rejected one")
+    assert isinstance(verdict1, Rejected)
     assert mop.pending_message == "rejected one"
 
-    v2 = await mop.submit_message("fresh attempt")
-    assert isinstance(v2, Accepted)
+    verdict2 = await mop.submit_message("fresh attempt")
+    assert isinstance(verdict2, Accepted)
     assert mop.pending_message is None
     assert deliveries == [("fresh attempt", None)]

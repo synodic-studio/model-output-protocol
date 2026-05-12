@@ -1,9 +1,8 @@
 """MOP rule loading and prelim regex hint collection.
 
-Rules live in YAML files under a `rules/active/` directory. v2 drops
-`severity` and `on_violation` from the runtime model — the LLM's verdict
-is the disposition. Existing YAML files with those fields still load
-fine; the fields are just ignored.
+Rules live in YAML files under a flat `rules/` directory. The LLM's
+verdict is the disposition; legacy `severity` and `on_violation` fields
+on a rule are silently ignored if present.
 
 Regex hints are a non-authoritative prelim pass. Any rule whose
 detector is `regex` and whose pattern matches the message contributes

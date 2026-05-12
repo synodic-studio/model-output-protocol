@@ -37,7 +37,7 @@ except ImportError:
 import os
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-RULES_DIR = Path(os.environ.get("MOP_RULES_DIR", REPO_ROOT / "rules")) / "active"
+RULES_DIR = Path(os.environ.get("MOP_RULES_DIR", REPO_ROOT / "rules"))
 CORPUS_DIR = Path(os.environ.get("MOP_EVALS_CORPUS", Path(__file__).resolve().parent / "counterexamples"))
 
 

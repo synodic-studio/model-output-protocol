@@ -17,7 +17,7 @@ MOP solves it by moving voice enforcement *out* of the agent and into a thin pro
 ```mermaid
 flowchart TD
     AGENT[Coding agent] -->|"submit_message(text)"| MCP["MOP MCP tools (in-process)"]
-    RULES[(rules/active/*.yml)] -.->|loaded| MCP
+    RULES[(rules/*.yml)] -.->|loaded| MCP
     MCP --> EVAL["Haiku call: accept | rewrite | reject"]
     HINTS["regex hints (advisory)"] -.->|context| EVAL
     EVAL --> APPLY{"verdict"}
