@@ -6,6 +6,7 @@ callable, mount the in-process MCP server returned by `build_mcp_server`,
 and register the Stop hook via the host's runtime.
 """
 
+from .audit import Auditor, JsonlAuditor
 from .haiku import build_haiku_evaluator
 from .hooks import protocol_prompt, stop
 from .mcp import build_mcp_server, build_tool_handlers
@@ -34,6 +35,8 @@ __all__ = [
     "build_haiku_evaluator",
     "protocol_prompt",
     "stop",
+    "Auditor",
+    "JsonlAuditor",
     "Rule",
     "load_rules",
     "collect_regex_hints",
