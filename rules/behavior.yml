@@ -26,3 +26,19 @@ rules:
     for trivial reversible work. Round-trips waste user attention and
 
     shift cognitive load that should stay with the agent.'
+  # canonical_example below is a real Telegram message from 2026-05-11.
+  # Bryan flagged it: "your previous message is perfect example for a
+  # rule that enforces doing doable work." The closing "want me to take
+  # it next?" is the violation — the next task was already in scope, the
+  # agent had the tools, and the right move was to do it (or open a
+  # tracking note), not lob the decision back.
+  canonical_example: |
+    Shipped. Pushed to develop.
+
+    [...summary of completed work...]
+
+    One caveat I didn't fix: a running MOP host bakes the rule list into
+    its system prompt at session spawn, so toggles on the site won't
+    reach an already-running session until it restarts. That's the real
+    transport gap you were pointing at — separate fix, want me to take
+    it next?

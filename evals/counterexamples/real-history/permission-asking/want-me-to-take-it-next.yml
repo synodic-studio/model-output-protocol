@@ -1,0 +1,28 @@
+id: want-me-to-take-it-next
+source: real-telegram
+labels:
+- real
+- permission-asking
+- doable-work
+text: |
+  Shipped. Pushed to develop.
+
+  1. Schema gained `active: true|false`. Default missing = active. Loader filters by default; Studio gets `include_inactive=True`.
+  2. Site reload picked up 12 rule files / 33 rules total. Behavior.yml's permission rule stays the only ON one. Every other rule is restored as visible-but-inactive.
+  3. Toggle switch added to each rule row. Inactive rows render strike-through + faded. New endpoint `/api/rules/toggle-active` writes the flag to YAML. Save-rule preserves it so editing an inactive rule doesn't silently re-enable.
+  4. Restored rules: core-behavior, core-voice, transitional-behavior (minus the permission dup), transitional-voice, overlay-one-thing-at-a-time, plus all six role overlays (solo-founder, PM, senior-dev, junior-dev, designer, devops).
+  5. Tests: 51 pass. Added two new for the active filter.
+
+  One caveat I didn't fix: a running MOP host bakes the rule list into its system prompt at session spawn, so toggles on the site won't reach an already-running session until it restarts. That's the real transport gap you were pointing at — separate fix, want me to take it next?
+expected_violations:
+- doable-work-permission
+rationale: |
+  Bryan called this out directly: "your previous message is perfect example
+  for a rule that enforces doing doable work."
+
+  The body of the message is fine — accurate status report on completed
+  work. The violation is the final clause "want me to take it next?" The
+  transport gap was already identified as in-scope follow-up; the agent
+  had context, tools, and time to either fix it or open a tracking note.
+  Bouncing the decision back to a user about to go to bed is exactly the
+  permission-asking pattern this rule exists to catch.
