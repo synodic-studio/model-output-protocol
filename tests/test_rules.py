@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from mop.rules import Rule, load_rules, collect_regex_hints
+from mop.rules import Rule, load_rules, collect_regex_hints, collect_lint_hints
 
 
 def test_load_rules_from_yaml(tmp_path: Path):
@@ -135,6 +135,102 @@ rules:
     )
     all_rules = load_rules(rules_dir, include_inactive=True)
     assert {r.name for r in all_rules} == {"live-rule", "dormant-rule"}
+
+
+def test_rule_defaults_lint_to_false():
+    """The `lint` field defaults to False for backward compat."""
+    r = Rule(
+        name="test",
+        detector="regex",
+        parameters={"type": "regex", "patterns": ["foo"]},
+        guidance="",
+        source_file="x.yml",
+    )
+    assert r.lint is False
+
+
+def test_load_rules_parses_lint_flag_from_yaml(tmp_path: Path):
+    """A YAML entry with `lint: true` produces a Rule with lint=True."""
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    (rules_dir / "mixed.yml").write_text(
+        """
+rules:
+  - name: inline-code
+    lint: true
+    detector: deterministic
+    parameters:
+      type: regex
+      patterns:
+        - hello\n  - name: no-permission
+    detector: llm
+    parameters:
+      prompt: "Is this asking permission for doable work?"
+    guidance: "Just do it"
+"""
+    )
+    rules = load_rules(rules_dir)
+    assert len(rules) == 2
+    lint_rule = next(r for r in rules if r.name == "inline-code")
+    llm_rule = next(r for r in rules if r.name == "no-permission")
+    assert lint_rule.lint is True
+    assert lint_rule.detector == "deterministic"
+    assert llm_rule.lint is False
+    assert llm_rule.detector == "llm"
+
+
+def test_collect_lint_hints_returns_only_lint_matches():
+    """`collect_lint_hints` only checks entries where lint=True.
+
+    LLM rules (lint=False) are skipped even if they carry regex patterns.
+    """
+    rules = [
+        Rule(
+            name="no-emojis",
+            detector="deterministic",
+            lint=True,
+            parameters={"type": "regex", "patterns": [r"\U0001f600"]},
+            guidance="No emojis.",
+            source_file="style.yml",
+        ),
+        Rule(
+            name="word-cap",
+            detector="deterministic",
+            lint=True,
+            parameters={"type": "word_count", "max": 5},
+            guidance="Max 5 words.",
+            source_file="style.yml",
+        ),
+        Rule(
+            name="llm-prose-rule",
+            detector="llm",
+            lint=False,
+            parameters={"prompt": "Is the message clear?"},
+            guidance="...",
+            source_file="x.yml",
+        ),
+    ]
+    hints = collect_lint_hints("hello \U0001f600 world this is too long", rules)
+    assert "no-emojis" in hints
+    assert "word-cap" in hints
+    assert "llm-prose-rule" not in hints
+
+
+def test_collect_regex_hints_still_works_for_legacy_deterministic():
+    """Legacy deterministic rules without `lint: true` are still collected
+    by `collect_regex_hints` for backward compatibility."""
+    rules = [
+        Rule(
+            name="old-detect",
+            detector="regex",
+            lint=False,
+            parameters={"type": "regex", "patterns": [r"hello"]},
+            guidance="Old style.",
+            source_file="legacy.yml",
+        ),
+    ]
+    hints = collect_regex_hints("hello world", rules)
+    assert "old-detect" in hints
 
 
 def test_collect_regex_hints_ignores_llm_rules():

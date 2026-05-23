@@ -32,7 +32,7 @@ import json
 import re
 import sys
 
-from display_metrics import (
+from mop.display_metrics import (
     MONO_LINE_WIDTH,
     PROSE_LINE_WIDTH,
     SCREEN_LINE_BUDGET,

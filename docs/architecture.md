@@ -10,6 +10,10 @@ agent → submit_message (MCP tool) → MOP.eval → deliver(text) → user
                                             ↘ FailedOpen → deliver(text, system_note)
 ```
 
+MOP is not a competing protocol to MCP (Model Context Protocol).
+The name is a playful inversion; MOP *may* use MCP to operate (e.g. via
+MCP tool definitions in a host harness).
+
 Counterpart on the input side: **HOP** (`human-output-protocol`).
 
 ---
@@ -21,7 +25,7 @@ Counterpart on the input side: **HOP** (`human-output-protocol`).
 | `Accepted` | `deliver(text)` called with the original message; `pending_message` cleared; `sent_message_this_turn = True`. |
 | `Rewritten(rewritten)` | `deliver(rewritten)` called; agent sees the rewritten text in the tool result so future references resolve. |
 | `Rejected(violations)` | `pending_message = source`; agent must call `submit_justification`. No delivery. |
-| `AcceptedFailedOpen(system_note)` | After `max_justification_attempts = 4`, MOP delivers the original plus a `system_note` bubble. Burns the budget. |
+| `AcceptedFailedOpen(system_note)` | After `max_justification_attempts = 4`, MOP delivers the original plus a `system_note` bubble. Burns the budget. This is an **escape hatch** — it is never produced by the LLM evaluator, only by MOP itself. |
 
 The verdict *is* the disposition — there's no separate severity or `on_violation` field.
 
@@ -73,12 +77,14 @@ MOP itself doesn't speak HTTP, doesn't know what an LLM provider is, and doesn't
 ```python
 MOP(
     rules=rules,
-    evaluator=async_callable(text, regex_hints, justification) -> Verdict,
+    evaluator=async_callable(text, lint_hints, justification) -> Verdict,
     deliver=async_callable(text, system_note?) -> None,
 )
 ```
 
 This keeps MOP transport-agnostic and LLM-agnostic. The reference Haiku evaluator lives in `mop.haiku` (`build_haiku_evaluator`); the host supplies its own `deliver` (Telegram, Slack, web socket, …).
+
+Lints feed hints to the evaluator; rules produce the verdict. See [`CONTEXT.md`](../CONTEXT.md) for the term definitions.
 
 ---
 
@@ -109,28 +115,46 @@ class EvalLLMResponse(BaseModel):
 
 ---
 
-## Rule format
+## Rule / Lint format
+
+### LLM Rule
 
 ```yaml
 name: rule-id
-detector: llm | regex | word_count
+detector: llm
 parameters:
-  prompt: "Does this message...?"   # llm
-  patterns: [...]                    # regex
-  max: 200                           # word_count
-guidance: "..."                      # surfaced to the LLM evaluator as advice
+  prompt: "Does this message...?"
+guidance: "..."                      # shown to the agent on rejection
 rationale: "..."                     # human-facing
-sunset_check: "..."                  # for transitional rules
 ```
 
-Rules live in a flat `rules/` directory and are loaded at startup. To stage a draft rule without enforcing it, keep it out of `rules/` (e.g. in a notes file outside the directory or behind a feature flag in your fork).
+### Lint (deterministic check)
+
+```yaml
+name: lint-id
+lint: true
+detector: deterministic
+parameters:
+  type: regex
+  patterns: [...]
+guidance: "..."                      # feeds into evaluator prompt as advisory context
+rationale: "..."                     # human-facing
+```
+
+Supported lint types:
+| Type | Extra fields |
+| --- | --- |
+| `regex` | `patterns` — Python-flavor regex list |
+| `word_count` | `max` — integer word ceiling |
+
+Lints live in the same flat `rules/` directory as rules. To stage a draft rule without enforcing it, keep `active: false` or keep the file outside `rules/`.
 
 ---
 
 ## Implementation status
 
 - [x] Verdict union, Gate, NoPendingMessageError types
-- [x] Rule loading + regex hint collection
+- [x] Rule / lint loading + hint collection
 - [x] `protocol_prompt(rules)` system-prompt builder
 - [x] `MOP` class — submit_message, submit_justification, get_rules, get_status
 - [x] Failed-open path
@@ -141,3 +165,5 @@ Rules live in a flat `rules/` directory and are loaded at startup. To stage a dr
 - [ ] Channels compatibility (audit-only mode)
 - [ ] CC plugin form of Stop hook (for non-SDK harnesses)
 - [ ] Streaming deterministic eval in channel mode
+- [ ] LLM rule support in eval harness (currently only lints are auto-tested)
+- [ ] Lint/rule schema formalization in YAML

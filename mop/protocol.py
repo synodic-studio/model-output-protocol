@@ -17,7 +17,7 @@ submit_justification stay consistent.
 from __future__ import annotations
 
 from .audit import Auditor
-from .rules import Rule, collect_regex_hints
+from .rules import Rule, collect_lint_hints, collect_regex_hints
 from .types import (
     Accepted,
     AcceptedFailedOpen,
@@ -56,8 +56,8 @@ class MOP:
     # ─── Tools ────────────────────────────────────────────────────────
 
     async def submit_message(self, msg: str) -> Verdict:
-        regex_hints = collect_regex_hints(msg, self.rules)
-        verdict = await self.evaluator(msg, regex_hints, None)
+        lint_hints = collect_lint_hints(msg, self.rules)
+        verdict = await self.evaluator(msg, lint_hints, None)
         return await self._apply(verdict, source=msg, attempt=0, justification=None)
 
     async def submit_justification(self, justification: str) -> Verdict:
@@ -72,8 +72,8 @@ class MOP:
         if self.justification_attempts > self.max_justification_attempts:
             return await self._failed_open(pending, attempt=attempt, justification=justification)
 
-        regex_hints = collect_regex_hints(pending, self.rules)
-        verdict = await self.evaluator(pending, regex_hints, justification)
+        lint_hints = collect_lint_hints(pending, self.rules)
+        verdict = await self.evaluator(pending, lint_hints, justification)
         return await self._apply(verdict, source=pending, attempt=attempt, justification=justification)
 
     def get_rules(self, regex_filter: str | None = None) -> list[Rule]:

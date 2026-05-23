@@ -4,10 +4,11 @@ Mined from a corpus of ~63 personal feedback memories from one heavy LLM-agent
 user. Generalizing to MOP core required heavy filtering — most of the corpus
 was project-specific or personal-style, not universal.
 
-## Litmus test for "is this a MOP rule?"
+## Litmus test for "is this a MOP rule or lint?"
 
-A rule belongs in MOP **if and only if the violation is detectable in the
-message text the agent emits.** If the rule is really about *what the agent
+A **rule** (LLM-evaluated directive) or **lint** (deterministic pattern
+check) belongs in MOP **if and only if the violation is detectable in the
+message text the agent emits.** If the entry is really about *what the agent
 did with tools* (ran tests, verified files, hit endpoints), MOP can only
 catch the lie about it — not the actual gap. That belongs in the hook layer.
 

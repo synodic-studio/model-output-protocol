@@ -25,10 +25,11 @@ import yaml
 @dataclass(frozen=True)
 class Rule:
     name: str
-    detector: str           # "regex" | "llm" | "word_count" (passed via parameters.type)
+    detector: str           # "llm" | "deterministic" | "regex" (legacy)
     parameters: dict
     guidance: str
     source_file: str
+    lint: bool = False      # True for deterministic pattern checks (advisory)
 
 
 def _entry_is_active(entry: dict) -> bool:
@@ -59,13 +60,35 @@ def load_rules(rules_dir: Path, *, include_inactive: bool = False) -> list[Rule]
                     parameters=entry.get("parameters", {}),
                     guidance=entry.get("guidance", ""),
                     source_file=str(path.relative_to(rules_dir)),
+                    lint=bool(entry.get("lint", False)),
                 )
             )
     return rules
 
 
+def _rule_matches(rule: Rule, text: str) -> bool:
+    """Check whether a rule's deterministic detector fires on `text`.
+
+    Supports regex and word_count types. Returns False for LLM rules.
+    """
+    if rule.detector == "llm":
+        return False
+    params = rule.parameters
+    dtype = params.get("type")
+    if dtype == "regex":
+        return any(re.search(pat, text) for pat in params.get("patterns", []))
+    if dtype == "word_count":
+        return len(text.split()) > params.get("max", 0)
+    return False
+
+
 def collect_regex_hints(text: str, rules: list[Rule]) -> list[str]:
     """Run all regex/word_count detectors against `text`. Return matching rule names.
+
+    Only checks rules whose detector is NOT "llm" — in practice this means
+    legacy deterministic rules (without `lint: true`). New code should
+    use `collect_lint_hints` instead, which only checks entries with
+    `lint: True`.
 
     These are advisory hints fed to the LLM eval as context. They are NOT
     authoritative — the LLM may still accept text that matches a regex,
@@ -73,15 +96,24 @@ def collect_regex_hints(text: str, rules: list[Rule]) -> list[str]:
     """
     hints: list[str] = []
     for rule in rules:
-        if rule.detector != "regex":
+        if rule.detector == "llm":
             continue
-        params = rule.parameters
-        dtype = params.get("type")
-        matched = False
-        if dtype == "regex":
-            matched = any(re.search(pat, text) for pat in params.get("patterns", []))
-        elif dtype == "word_count":
-            matched = len(text.split()) > params.get("max", 0)
-        if matched:
+        if _rule_matches(rule, text):
+            hints.append(rule.name)
+    return hints
+
+
+def collect_lint_hints(text: str, rules: list[Rule]) -> list[str]:
+    """Run all lint entries against `text`. Return matching rule names.
+
+    Only checks entries where `lint=True`. LLM rules and legacy
+    deterministic rules without the lint flag are skipped. This is
+    the preferred collection pathway for new code.
+    """
+    hints: list[str] = []
+    for rule in rules:
+        if not rule.lint:
+            continue
+        if _rule_matches(rule, text):
             hints.append(rule.name)
     return hints
