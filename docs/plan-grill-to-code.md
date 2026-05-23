@@ -38,7 +38,11 @@ Tracking work from the grill-with-docs session through implementation.
 - [x] Dropped per-variant imports from `mcp.py` and `audit.py`
 - [x] 4 serialize tests added to `test_types.py` — 139 total, all green
 
-## Phase 4: Wire format_score as built-in lint
+## Phase 4: Wire format_score as built-in lint ✅
 
-- [ ] `mop/rules.py` — built-in lints (format_score as a pluggable hint source)
-- [ ] Evaluator prompt includes format score when threshold exceeded
+- [x] `mop/rules.py` — `register_builtin_lint()` / `BuiltinLint` type for global registration
+- [x] `load_rules()` auto-injects registered built-in lints into every result
+- [x] `_rule_matches()` handles `builtin_lint` detector type
+- [x] Registered `format-score-too-high` with threshold (score > 20.0) in `mop/__init__.py`
+- [x] `collect_lint_hints()` picks up built-in lint, feeds into evaluator's `regex_hints` param
+- [x] 4 tests: built-in collection, fires on long message, no-fire on short, collect_lint_hints integration
