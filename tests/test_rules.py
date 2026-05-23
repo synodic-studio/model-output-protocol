@@ -26,11 +26,14 @@ rules:
 """
     )
     rules = load_rules(rules_dir)
-    assert len(rules) == 2
+    assert len(rules) == 3  # 2 from yaml + 1 built-in lint
     assert rules[0].name == "no-emojis"
     assert rules[0].detector == "regex"
     assert rules[1].name == "brevity"
     assert rules[1].detector == "llm"
+    assert rules[2].name == "format-score-too-high"
+    assert rules[2].detector == "deterministic"
+    assert rules[2].lint is True
 
 
 def test_load_rules_ignores_severity_and_on_violation(tmp_path: Path):
@@ -51,10 +54,12 @@ rules:
 """
     )
     rules = load_rules(rules_dir)
-    assert len(rules) == 1
+    assert len(rules) == 2  # 1 from yaml + 1 built-in lint
+    file_rules = [r for r in rules if r.source_file != "<builtin>"]
+    assert len(file_rules) == 1
     # severity / on_violation are NOT attributes on the Rule dataclass
-    assert not hasattr(rules[0], "severity")
-    assert not hasattr(rules[0], "on_violation")
+    assert not hasattr(file_rules[0], "severity")
+    assert not hasattr(file_rules[0], "on_violation")
 
 
 def test_collect_regex_hints_returns_matched_rule_names():
@@ -110,7 +115,7 @@ rules:
     )
     rules = load_rules(rules_dir)
     names = {r.name for r in rules}
-    assert names == {"live-rule", "explicit-active-rule"}
+    assert names == {"live-rule", "explicit-active-rule", "format-score-too-high"}
 
 
 def test_load_rules_include_inactive_returns_everything(tmp_path: Path):
@@ -134,7 +139,7 @@ rules:
 """
     )
     all_rules = load_rules(rules_dir, include_inactive=True)
-    assert {r.name for r in all_rules} == {"live-rule", "dormant-rule"}
+    assert {r.name for r in all_rules} == {"live-rule", "dormant-rule", "format-score-too-high"}
 
 
 def test_rule_defaults_lint_to_false():
@@ -170,13 +175,16 @@ rules:
 """
     )
     rules = load_rules(rules_dir)
-    assert len(rules) == 2
+    assert len(rules) == 3  # 2 from yaml + 1 built-in lint
     lint_rule = next(r for r in rules if r.name == "inline-code")
     llm_rule = next(r for r in rules if r.name == "no-permission")
+    builtin = next(r for r in rules if r.name == "format-score-too-high")
     assert lint_rule.lint is True
     assert lint_rule.detector == "deterministic"
     assert llm_rule.lint is False
     assert llm_rule.detector == "llm"
+    assert builtin.lint is True
+    assert builtin.source_file == "<builtin>"
 
 
 def test_collect_lint_hints_returns_only_lint_matches():
@@ -231,6 +239,89 @@ def test_collect_regex_hints_still_works_for_legacy_deterministic():
     ]
     hints = collect_regex_hints("hello world", rules)
     assert "old-detect" in hints
+
+
+def test_builtin_format_lint_collected_by_load_rules(tmp_path: Path):
+    """The format-score-too-high built-in lint appears in load_rules()."""
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    (rules_dir / "dummy.yml").write_text(
+        """
+rules:
+  - name: silence
+    detector: deterministic
+    parameters:
+      type: regex
+      patterns: ["silence"]
+    guidance: "..."
+"""
+    )
+    rules = load_rules(rules_dir)
+    builtin = next(r for r in rules if r.name == "format-score-too-high")
+    assert builtin.detector == "deterministic"
+    assert builtin.lint is True
+    assert builtin.source_file == "<builtin>"
+
+
+def test_format_lint_hint_fires_on_long_message():
+    """A long prose-heavy message triggers the format-score-too-high hint."""
+    from mop.rules import _rule_matches
+
+    rule = Rule(
+        name="format-score-too-high",
+        detector="deterministic",
+        parameters={"type": "builtin_lint"},
+        guidance="...",
+        source_file="<builtin>",
+        lint=True,
+    )
+    # 50 lines of prose should trigger 33+ prose-structure penalty alone
+    long_msg = "\n".join(["this is a very long prose line that just keeps going" for _ in range(50)])
+    assert _rule_matches(rule, long_msg) is True
+
+
+def test_format_lint_hint_does_not_fire_on_short_message():
+    from mop.rules import _rule_matches
+
+    rule = Rule(
+        name="format-score-too-high",
+        detector="deterministic",
+        parameters={"type": "builtin_lint"},
+        guidance="...",
+        source_file="<builtin>",
+        lint=True,
+    )
+    assert _rule_matches(rule, "short message") is False
+
+
+def test_format_lint_collected_by_collect_lint_hints():
+    """collect_lint_hints picks up the format-score-too-high built-in."""
+    from mop import load_rules, collect_lint_hints
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as td:
+        rules_dir = Path(td)
+        (rules_dir / "dummy.yml").write_text(
+            """
+rules:
+  - name: silence
+    detector: deterministic
+    parameters:
+      type: regex
+      patterns: ["silence"]
+    guidance: "..."
+"""
+        )
+        rules = load_rules(rules_dir)
+        # Short message should NOT trigger the format lint
+        hints = collect_lint_hints("hello world", rules)
+        assert "format-score-too-high" not in hints
+
+        # Long prose-heavy message SHOULD trigger
+        long_msg = "\n".join(["this is a very long prose line that just keeps going" for _ in range(50)])
+        hints = collect_lint_hints(long_msg, rules)
+        assert "format-score-too-high" in hints
 
 
 def test_collect_regex_hints_ignores_llm_rules():

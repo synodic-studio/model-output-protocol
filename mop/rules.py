@@ -18,8 +18,23 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 import yaml
+
+
+# Built-in lint: any registered check is automatically added to loaded rules
+BuiltinLint = Callable[[str], bool]
+_BUILTIN_LINTS: dict[str, tuple[str, BuiltinLint]] = {}
+
+
+def register_builtin_lint(name: str, guidance: str, check: BuiltinLint) -> None:
+    """Register a built-in lint check.
+
+    ``check(text)`` returns True when the lint fires. Registrations are
+    global and auto-injected by ``load_rules()``.
+    """
+    _BUILTIN_LINTS[name] = (guidance, check)
 
 
 @dataclass(frozen=True)
@@ -45,6 +60,9 @@ def load_rules(rules_dir: Path, *, include_inactive: bool = False) -> list[Rule]
     of flag — useful for the Studio UI which wants to surface inactive
     rules so users can toggle them on. Ignores legacy `severity` /
     `on_violation` fields.
+
+    Built-in lints (registered via ``register_builtin_lint()``) are
+    automatically appended to every result.
     """
     rules: list[Rule] = []
     for path in sorted(rules_dir.rglob("*.yml")):
@@ -63,13 +81,25 @@ def load_rules(rules_dir: Path, *, include_inactive: bool = False) -> list[Rule]
                     lint=bool(entry.get("lint", False)),
                 )
             )
+    for name, (guidance, check) in _BUILTIN_LINTS.items():
+        rules.append(
+            Rule(
+                name=name,
+                detector="deterministic",
+                parameters={"type": "builtin_lint"},
+                guidance=guidance,
+                source_file="<builtin>",
+                lint=True,
+            )
+        )
     return rules
 
 
 def _rule_matches(rule: Rule, text: str) -> bool:
     """Check whether a rule's deterministic detector fires on `text`.
 
-    Supports regex and word_count types. Returns False for LLM rules.
+    Supports regex, word_count, and builtin_lint types. Returns False
+    for LLM rules.
     """
     if rule.detector == "llm":
         return False
@@ -79,6 +109,10 @@ def _rule_matches(rule: Rule, text: str) -> bool:
         return any(re.search(pat, text) for pat in params.get("patterns", []))
     if dtype == "word_count":
         return len(text.split()) > params.get("max", 0)
+    if dtype == "builtin_lint":
+        entry = _BUILTIN_LINTS.get(rule.name)
+        if entry is not None:
+            return entry[1](text)
     return False
 
 
