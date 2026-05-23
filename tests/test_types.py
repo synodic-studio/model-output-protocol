@@ -35,6 +35,30 @@ def test_rejected_carries_violations():
     assert v.violations == ["rule-a", "rule-b"]
 
 
+# ---------------------------------------------------------------------------
+# serialize
+# ---------------------------------------------------------------------------
+
+
+def test_accepted_serialize():
+    assert Accepted().serialize() == {"verdict": "accepted"}
+
+
+def test_accepted_failed_open_serialize():
+    v = AcceptedFailedOpen(system_note="ran out of tries")
+    assert v.serialize() == {"verdict": "accepted_failed_open", "system_note": "ran out of tries"}
+
+
+def test_rewritten_serialize():
+    v = Rewritten(rewritten="cleaned")
+    assert v.serialize() == {"verdict": "rewritten", "rewritten": "cleaned"}
+
+
+def test_rejected_serialize():
+    v = Rejected(violations=["rule-a", "rule-b"])
+    assert v.serialize() == {"verdict": "rejected", "violations": ["rule-a", "rule-b"]}
+
+
 def test_gate_allow_and_block():
     a: Gate = Allow()
     b: Gate = Block(reason="no message sent this turn")

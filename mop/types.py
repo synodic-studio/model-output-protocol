@@ -30,12 +30,18 @@ from pydantic import BaseModel
 class Accepted:
     """LLM accepted the message; deliver() was called with the original text."""
 
+    def serialize(self) -> dict:
+        return {"verdict": "accepted"}
+
 
 @dataclass(frozen=True)
 class AcceptedFailedOpen:
     """Justification budget exhausted; original was delivered with a system note."""
 
     system_note: str
+
+    def serialize(self) -> dict:
+        return {"verdict": "accepted_failed_open", "system_note": self.system_note}
 
 
 @dataclass(frozen=True)
@@ -44,12 +50,18 @@ class Rewritten:
 
     rewritten: str
 
+    def serialize(self) -> dict:
+        return {"verdict": "rewritten", "rewritten": self.rewritten}
+
 
 @dataclass(frozen=True)
 class Rejected:
     """LLM rejected the message; agent must call submit_justification."""
 
     violations: list[str]
+
+    def serialize(self) -> dict:
+        return {"verdict": "rejected", "violations": list(self.violations)}
 
 
 Verdict = Union[Accepted, AcceptedFailedOpen, Rewritten, Rejected]

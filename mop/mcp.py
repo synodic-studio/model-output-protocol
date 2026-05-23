@@ -23,27 +23,12 @@ from typing import Any, Awaitable, Callable
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
 from .protocol import MOP
-from .types import (
-    Accepted,
-    AcceptedFailedOpen,
-    NoPendingMessageError,
-    Rejected,
-    Rewritten,
-    Verdict,
-)
+from .types import NoPendingMessageError, Verdict
 
 
 def _verdict_payload(v: Verdict) -> dict[str, Any]:
     """Serialize a Verdict to a dict the agent can branch on."""
-    if isinstance(v, Accepted):
-        return {"verdict": "accepted"}
-    if isinstance(v, AcceptedFailedOpen):
-        return {"verdict": "accepted_failed_open", "system_note": v.system_note}
-    if isinstance(v, Rewritten):
-        return {"verdict": "rewritten", "rewritten": v.rewritten}
-    if isinstance(v, Rejected):
-        return {"verdict": "rejected", "violations": v.violations}
-    raise ValueError(f"unknown verdict type: {type(v).__name__}")
+    return v.serialize()
 
 
 def _ok(payload: dict[str, Any]) -> dict[str, Any]:

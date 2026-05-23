@@ -30,9 +30,13 @@ Tracking work from the grill-with-docs session through implementation.
 - [x] Updated `mop/__init__.py` to export new evaluator names
 - [x] Tests: 14 evaluator tests covering both backends + factory dispatch
 
-## Phase 3: Cleanup
+## Phase 3: Cleanup ✅
 
-- [ ] Add `Verdict.serialize()` method to consolidate `mcp._verdict_payload` and `audit.verdict_to_dict()`
+- [x] Added `Verdict.serialize()` to each verdict variant (Accepted, AcceptedFailedOpen, Rewritten, Rejected)
+- [x] Replaced `mcp._verdict_payload` with `v.serialize()`
+- [x] Replaced `audit._verdict_payload` with `v.serialize()`
+- [x] Dropped per-variant imports from `mcp.py` and `audit.py`
+- [x] 4 serialize tests added to `test_types.py` — 139 total, all green
 
 ## Phase 4: Wire format_score as built-in lint
 

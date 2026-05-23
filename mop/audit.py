@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
 
-from .types import Accepted, AcceptedFailedOpen, Rejected, Rewritten, Verdict
+from .types import Verdict
 
 
 class Auditor(Protocol):
@@ -39,15 +39,7 @@ class Auditor(Protocol):
 
 
 def _verdict_payload(verdict: Verdict) -> dict:
-    if isinstance(verdict, Accepted):
-        return {"verdict": "accepted"}
-    if isinstance(verdict, Rewritten):
-        return {"verdict": "rewritten", "rewritten": verdict.rewritten}
-    if isinstance(verdict, Rejected):
-        return {"verdict": "rejected", "violations": list(verdict.violations)}
-    if isinstance(verdict, AcceptedFailedOpen):
-        return {"verdict": "accepted_failed_open", "system_note": verdict.system_note}
-    return {"verdict": "unknown"}
+    return verdict.serialize()
 
 
 class JsonlAuditor:
