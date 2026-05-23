@@ -5,13 +5,14 @@ counterexamples/**/*.yml, then evaluates each deterministic rule against
 each example and reports mismatches between expected and observed
 violations.
 
-LLM-based rules are listed in the summary but skipped. They require a
-Haiku call in the loop and will be wired in when the filter pipeline
-lands.
+LLM-based rules are skipped by default. Pass --llm to evaluate them
+against the counterexample corpus using the configured LLM evaluator
+(deepseek by default).
 
 Usage:
-    python harness.py                # all rules vs all counterexamples
-    python harness.py --rule <name>  # one rule
+    python harness.py                # all deterministic rules vs all examples
+    python harness.py --rule <name>  # one rule (deterministic or LLM)
+    python harness.py --llm          # also evaluate LLM rules
     python harness.py --verbose      # show example text on mismatch
     python harness.py --json         # machine-readable output
 """
@@ -125,6 +126,111 @@ def evaluate_deterministic(rule: Rule, text: str) -> bool:
     )
 
 
+def run_llm_eval(
+    rules: list[Rule],
+    examples: list[Counterexample],
+    verbose: bool,
+) -> tuple[list[dict], int]:
+    """Evaluate LLM rules against counterexamples.
+
+    Uses the real ``mop.rules.Rule`` instances (with ``guidance`` and
+    ``lint`` fields) via ``mop.evaluators.build_evaluator``.
+
+    Returns (mismatches, correct_count).
+    """
+    # Import the real MOP rules loader to get LLM rules with guidance
+    from mop.evaluators import build_evaluator
+    from mop.rules import load_rules as mop_load_rules
+    from mop.types import Accepted, Rejected
+
+    real_rules = mop_load_rules(RULES_DIR)
+    llm_rules = [r for r in real_rules if r.detector == "llm"]
+
+    if not llm_rules:
+        print("No LLM rules found.")
+        return [], 0
+
+    # Build the evaluator using the real LLM rules
+    evaluator = build_evaluator(rules=llm_rules)
+
+    mismatches: list[dict] = []
+    correct = 0
+
+    print(f"\n--- LLM Eval ({len(llm_rules)} rules, {len(examples)} examples) ---")
+
+    for example in examples:
+        for rr in llm_rules:
+            # Only evaluate this rule if the example mentions it
+            should_violate = rr.name in example.expected_violations
+            should_be_clean = rr.name in example.expected_clean
+
+            if not should_violate and not should_be_clean:
+                continue  # example doesn't annotate this rule
+
+            # Run LLM evaluator — only the hint for this specific rule
+            import asyncio
+
+            try:
+                verdict = asyncio.run(
+                    evaluator(example.text, [rr.name] if should_violate else [], None)
+                )
+            except Exception as exc:
+                mismatches.append(
+                    {
+                        "type": "eval_error",
+                        "rule": rr.name,
+                        "example": example.id,
+                        "file": example.file_path,
+                        "error": str(exc),
+                    }
+                )
+                continue
+
+            llm_violated = isinstance(verdict, Rejected) and (
+                rr.name in verdict.violations
+            )
+
+            if llm_violated and should_violate:
+                correct += 1
+            elif isinstance(verdict, Accepted) and should_be_clean:
+                correct += 1
+            elif isinstance(verdict, Rejected) and should_be_clean:
+                mismatches.append(
+                    {
+                        "type": "false_alarm",
+                        "rule": rr.name,
+                        "example": example.id,
+                        "file": example.file_path,
+                        "llm_violations": verdict.violations,
+                    }
+                )
+            elif isinstance(verdict, Accepted) and should_violate:
+                mismatches.append(
+                    {
+                        "type": "missed",
+                        "rule": rr.name,
+                        "example": example.id,
+                        "file": example.file_path,
+                    }
+                )
+            elif (
+                isinstance(verdict, Rejected)
+                and should_violate
+                and rr.name not in verdict.violations
+            ):
+                mismatches.append(
+                    {
+                        "type": "wrong_violation",
+                        "rule": rr.name,
+                        "example": example.id,
+                        "file": example.file_path,
+                        "llm_violations": verdict.violations,
+                    }
+                )
+
+    return mismatches, correct
+
+
 def run(args: argparse.Namespace) -> int:
     rules = load_rules(RULES_DIR)
     examples = load_counterexamples(CORPUS_DIR)
@@ -149,10 +255,6 @@ def run(args: argparse.Namespace) -> int:
             should_not_fire = rule.name in example.expected_clean
 
             if fired and not should_fire and rule.name not in example.expected_violations:
-                # Fired but not expected. Only a mismatch if explicitly
-                # listed as clean OR if any expected_violations are set
-                # (i.e., this example is annotated). Otherwise we can't
-                # say if it's a false positive.
                 if should_not_fire or example.expected_violations:
                     mismatches.append(
                         {
@@ -180,36 +282,49 @@ def run(args: argparse.Namespace) -> int:
             else:
                 skipped_pairs += 1
 
+    llm_mismatches: list[dict] = []
+    llm_correct = 0
+    if args.llm and llm_rules:
+        llm_mismatches, llm_correct = run_llm_eval(llm_rules, examples, args.verbose)
+
     summary = {
         "rules_total": len(rules),
         "rules_deterministic": len(deterministic_rules),
-        "rules_llm_skipped": len(llm_rules),
+        "rules_llm": len(llm_rules),
         "examples": len(examples),
-        "correct": correct,
-        "mismatches": len(mismatches),
-        "untested_pairs": skipped_pairs,
+        "deterministic_correct": correct,
+        "deterministic_mismatches": len(mismatches),
+        "deterministic_untested": skipped_pairs,
+        "llm_correct": llm_correct,
+        "llm_mismatches": len(llm_mismatches),
     }
 
     if args.json:
         print(
             json.dumps(
-                {"summary": summary, "mismatches": mismatches},
+                {
+                    "summary": summary,
+                    "deterministic_mismatches": mismatches,
+                    "llm_mismatches": llm_mismatches,
+                },
                 indent=2,
             )
         )
-        return 0 if not mismatches else 1
+        return 0 if not mismatches and not llm_mismatches else 1
 
     print(f"Rules:               {summary['rules_total']}")
     print(f"  deterministic:     {summary['rules_deterministic']}")
-    print(f"  llm (skipped):     {summary['rules_llm_skipped']}")
+    print(f"  llm:               {summary['rules_llm']}")
     print(f"Counterexamples:     {summary['examples']}")
-    print(f"Correct (matched):   {summary['correct']}")
-    print(f"Mismatches:          {summary['mismatches']}")
-    print(f"Untested pairs:      {summary['untested_pairs']}")
-    print()
+    print(f"")
+    print(f"--- Deterministic ---")
+    print(f"Correct:             {summary['deterministic_correct']}")
+    print(f"Mismatches:          {summary['deterministic_mismatches']}")
+    print(f"Untested pairs:      {summary['deterministic_untested']}")
 
     if mismatches:
-        print("MISMATCHES:")
+        print()
+        print("DETERMINISTIC MISMATCHES:")
         for m in mismatches:
             print(f"  [{m['type']}] {m['rule']} vs {m['example']}")
             if args.verbose:
@@ -217,13 +332,32 @@ def run(args: argparse.Namespace) -> int:
                 snippet = example.text.strip().splitlines()[0][:80]
                 print(f"      {snippet}")
 
-    if llm_rules and args.verbose:
+    if args.llm:
         print()
-        print("LLM rules (not evaluated by harness):")
-        for r in llm_rules:
-            print(f"  {r.name}  ({r.source_file})")
+        print(f"--- LLM Eval ---")
+        print(f"Correct:             {summary['llm_correct']}")
+        print(f"Mismatches:          {summary['llm_mismatches']}")
 
-    return 0 if not mismatches else 1
+        if llm_mismatches:
+            print()
+            print("LLM MISMATCHES:")
+            for m in llm_mismatches:
+                msg = f"  [{m['type']}] {m['rule']} vs {m['example']}"
+                if "llm_violations" in m:
+                    msg += f" (LLM said: {', '.join(m['llm_violations'])})"
+                if "error" in m:
+                    msg += f" (error: {m['error']})"
+                print(msg)
+                if args.verbose and "file" in m:
+                    example = next(e for e in examples if e.id == m["example"])
+                    snippet = example.text.strip().splitlines()[0][:80]
+                    print(f"      {snippet}")
+
+    if not args.llm and llm_rules:
+        print()
+        print(f"LLM rules ({len(llm_rules)}) skipped. Pass --llm to evaluate.")
+
+    return 0 if not mismatches and not llm_mismatches else 1
 
 
 def main() -> None:
@@ -234,6 +368,11 @@ def main() -> None:
     )
     parser.add_argument(
         "--json", action="store_true", help="Emit machine-readable JSON"
+    )
+    parser.add_argument(
+        "--llm",
+        action="store_true",
+        help="Also evaluate LLM rules against the counterexample corpus",
     )
     args = parser.parse_args()
     sys.exit(run(args))

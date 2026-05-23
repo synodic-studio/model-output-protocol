@@ -20,11 +20,15 @@ Tracking work from the grill-with-docs session through implementation.
 - [x] Tests for `display_metrics` (42 tests covering all functions)
 - [x] Tests for `format_score` (25 tests covering all penalty terms)
 
-## Phase 2: LLM Eval Harness
+## Phase 2: LLM Eval Harness ✅
 
-- [ ] `evals/harness.py` — add `--llm` / `--llm-model` flags
-- [ ] `evals/harness.py` — when `--llm`, load `build_haiku_evaluator` and run LLM rules against counterexamples
-- [ ] `evals/harness.py` — report LLM eval results alongside lint results
+- [x] `mop/haiku.py` → `mop/evaluators.py` — renamed and generalized
+- [x] `mop/evaluators.py` — `build_deepseek_evaluator()` using OpenAI-compatible API
+- [x] `mop/evaluators.py` — `build_evaluator()` factory dispatching on `MOP_EVALUATOR` envar
+- [x] `evals/harness.py` — add `--llm` flag to run LLM rules against counterexamples
+- [x] `evals/harness.py` — LLM eval path imports real `mop.rules.Rule` with `guidance`
+- [x] Updated `mop/__init__.py` to export new evaluator names
+- [x] Tests: 14 evaluator tests covering both backends + factory dispatch
 
 ## Phase 3: Cleanup
 
