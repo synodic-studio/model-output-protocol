@@ -2,7 +2,7 @@
 
 **A filter that sits between an LLM agent and its human user, enforcing communication rules before output reaches them.**
 
-The structural counterpart to [MCP (Model Context Protocol)](https://modelcontextprotocol.io). MCP defines how agents receive context from tools and services. MOP defines how agents deliver context to humans — the other half of the loop.
+The name is a wink at the [Model Context Protocol](https://modelcontextprotocol.io), nothing more. MOP is not a protocol in that sense and has nothing to do with MCP beyond the pun. It is a filtering layer: a gate every agent message passes through before it reaches the user.
 
 ## The problem
 
