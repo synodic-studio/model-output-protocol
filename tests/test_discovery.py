@@ -30,6 +30,13 @@ def test_builtin_rules_load_nonempty():
     assert "verify-before-asserting" not in names    # inactive, dropped by load_rules
 
 
+def test_builtin_exact_set():
+    """Pin exactly the two active builtin rules + the builtin lint."""
+    rules = load_builtin_rules()
+    names = {r.name for r in rules}
+    assert names == {"no-fabricated-attribution", "links-for-references", "format-score-too-high"}
+
+
 def test_builtin_copies_stay_in_sync_with_rules_dir():
     """Guard against drift between rules/ (dev corpus) and packaged copies.
 

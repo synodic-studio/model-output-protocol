@@ -5,7 +5,6 @@ description = "MOP — output filter that mediates between an LLM agent and its 
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "pydantic-ai[anthropic]>=1.90.0",
     "pyyaml>=6.0",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
@@ -14,6 +13,16 @@ dependencies = [
     "litellm>=1.55",
     "pydantic>=2",
 ]
+
+[project.scripts]
+mop = "mop.cli:main"
+
+[tool.uv]
+package = true
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
 
 [dependency-groups]
 dev = [

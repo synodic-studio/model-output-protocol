@@ -111,10 +111,13 @@ def _strip_fences(content: str) -> str:
     """Strip a single wrapping ```/```json code fence, if present."""
     stripped = content.strip()
     if stripped.startswith("```"):
-        first_newline = stripped.index("\n") if "\n" in stripped else len(stripped)
-        stripped = stripped[first_newline + 1 :]
-        if stripped.endswith("```"):
-            stripped = stripped[: -3]
+        idx = stripped.index("\n") if "\n" in stripped else -1
+        if idx >= 0:
+            stripped = stripped[idx + 1 :]
+            if stripped.endswith("```"):
+                stripped = stripped[: -3]
+        # No newline after opening fence — can't determine where fence ends.
+        # Pass the stripped content through as-is.
     return stripped.strip()
 
 
@@ -147,7 +150,13 @@ def build_litellm_evaluator(
             **kwargs,
         )
         content = response.choices[0].message.content or ""
-        parsed = EvalLLMResponse.model_validate_json(_strip_fences(content))
+        try:
+            parsed = EvalLLMResponse.model_validate_json(_strip_fences(content))
+        except Exception:
+            # Malformed response — treat as rejected with a system-level error
+            from .types import Rejected
+
+            return Rejected(violations=["__eval_parse_error__"])
         return verdict_from_eval_response(parsed, original_text=text)
 
     return evaluate

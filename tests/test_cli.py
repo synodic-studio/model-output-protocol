@@ -204,6 +204,67 @@ def test_model_flag_reaches_builder(repo, monkeypatch):
     assert seen["model"] == "openai/gpt-4o-mini"
 
 
+# ---------------------------------------------------------------------------
+# mop rules subcommand
+# ---------------------------------------------------------------------------
+
+
+def test_rules_list_human(repo, capsys):
+    code = main(["rules", "list"])
+    assert code == EXIT_ACCEPTED
+    out = capsys.readouterr().out
+    assert "Rules" in out
+    assert "no-fabricated-attribution" in out
+    assert "links-for-references" in out
+
+
+def test_rules_list_json(repo, capsys):
+    code = main(["rules", "list", "--json"])
+    assert code == EXIT_ACCEPTED
+    payload = json.loads(capsys.readouterr().out)
+    assert isinstance(payload, list)
+    names = {r["name"] for r in payload}
+    assert "no-fabricated-attribution" in names
+    assert "links-for-references" in names
+
+
+def test_rules_show_human(repo, capsys):
+    code = main(["rules", "show", "no-fabricated-attribution"])
+    assert code == EXIT_ACCEPTED
+    out = capsys.readouterr().out
+    assert "Name:" in out
+    assert "no-fabricated-attribution" in out
+    assert "Detector:" in out
+
+
+def test_rules_show_json(repo, capsys):
+    code = main(["rules", "show", "no-fabricated-attribution", "--json"])
+    assert code == EXIT_ACCEPTED
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["name"] == "no-fabricated-attribution"
+    assert payload["detector"] == "llm"
+
+
+def test_rules_show_unknown_name(repo, capsys):
+    code = main(["rules", "show", "does-not-exist"])
+    assert code == EXIT_ERROR
+    assert "does-not-exist" in capsys.readouterr().err
+
+
+def test_rules_list_with_explicit_file(repo, capsys, tmp_path):
+    explicit = tmp_path / "explicit.yml"
+    explicit.write_text(
+        yaml.safe_dump(
+            {"rules": [{"name": "only-rule", "detector": "llm", "guidance": "g"}]}
+        )
+    )
+    code = main(["rules", "list", "--rules-file", str(explicit)])
+    assert code == EXIT_ACCEPTED
+    out = capsys.readouterr().out
+    assert "only-rule" in out
+    assert "no-fabricated-attribution" in out  # builtins still present as base layer
+
+
 def test_evaluator_exception_exits_error(repo, monkeypatch, capsys):
     async def boom(text, hints, justification):
         raise RuntimeError("provider exploded")

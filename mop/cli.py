@@ -6,6 +6,9 @@ verdict. Unlike the stateful MCP adapter, there is no pending message
 and no justification-attempt budget: ``--justify`` attaches a
 justification to the single evaluation call.
 
+``mop rules list`` shows the resolved rule set.
+``mop rules show <name>`` shows details of one rule.
+
 Exit codes: 0 accepted, 1 rewritten, 2 rejected, 3 usage/runtime error.
 """
 
@@ -15,6 +18,7 @@ import argparse
 import asyncio
 import json
 import sys
+import textwrap
 from dataclasses import asdict
 from pathlib import Path
 
@@ -119,13 +123,81 @@ def _build_parser() -> argparse.ArgumentParser:
     check_p.add_argument("--model", help="litellm model string (default: MOP_EVALUATOR_MODEL)")
     check_p.add_argument("--justify", metavar="REASON", help="Attach a justification")
     check_p.add_argument("--json", action="store_true", dest="as_json")
+
+    rules_p = sub.add_parser("rules", help="List or show rules.")
+    rules_sub = rules_p.add_subparsers(dest="rules_command", required=True)
+
+    list_p = rules_sub.add_parser("list", help="List all resolved rules.")
+    list_p.add_argument("--rules-dir", type=Path, help="Explicit rules dir (skips discovery)")
+    list_p.add_argument("--rules-file", type=Path, help="Explicit rules file (skips discovery)")
+    list_p.add_argument("--json", action="store_true", dest="as_json")
+
+    show_p = rules_sub.add_parser("show", help="Show details of one rule.")
+    show_p.add_argument("name", help="Rule name to show")
+    show_p.add_argument("--rules-dir", type=Path, help="Explicit rules dir (skips discovery)")
+    show_p.add_argument("--rules-file", type=Path, help="Explicit rules file (skips discovery)")
+    show_p.add_argument("--json", action="store_true", dest="as_json")
+
     return parser
+
+
+def _run_rules(args: argparse.Namespace, all_rules: list[Rule]) -> int:
+    if args.rules_command == "list":
+        if args.as_json:
+            payload = [
+                {
+                    "name": r.name,
+                    "detector": r.detector,
+                    "lint": r.lint,
+                    "active": r.active,
+                    "source_file": r.source_file,
+                    "guidance": r.guidance,
+                }
+                for r in all_rules
+            ]
+            print(json.dumps(payload))
+        else:
+            lines = []
+            for r in all_rules:
+                status = "active" if r.active else "inactive"
+                kind = "lint" if r.lint else r.detector
+                lines.append(f"  {r.name:<42s} {status:<10s} {kind:<14s} {r.source_file}")
+            print(f"Rules ({len(all_rules)}):")
+            print("  " + "-" * 78)
+            print("  " + f"{'Name':<42s} {'Status':<10s} {'Kind':<14s} Source")
+            print("  " + "-" * 78)
+            for line in lines:
+                print(line)
+        return EXIT_ACCEPTED
+
+    # rules show
+    matches = [r for r in all_rules if r.name == args.name]
+    if not matches:
+        print(f"mop: no rule named {args.name!r}", file=sys.stderr)
+        return EXIT_ERROR
+    rule = matches[0]
+    if args.as_json:
+        print(json.dumps(asdict(rule)))
+    else:
+        wrapped = textwrap.fill(rule.guidance, width=72, initial_indent="  ", subsequent_indent="  ")
+        print(f"  Name:        {rule.name}")
+        print(f"  Detector:    {rule.detector}")
+        print(f"  Lint:        {rule.lint}")
+        print(f"  Active:      {rule.active}")
+        print(f"  Source:      {rule.source_file}")
+        print(f"  Parameters:  {json.dumps(rule.parameters)}")
+        print(f"  Guidance:\n{wrapped}")
+    return EXIT_ACCEPTED
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.command == "rules":
+            rules = resolve_rules(rules_dir=args.rules_dir, rules_file=args.rules_file)
+            return _run_rules(args, rules)
+        # check command
         rules = resolve_rules(rules_dir=args.rules_dir, rules_file=args.rules_file)
         return _run_check(args, rules)
     except Exception as exc:  # argparse errors exit(2) on their own before this

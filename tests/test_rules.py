@@ -2,7 +2,14 @@
 
 from pathlib import Path
 
-from mop.rules import Rule, load_rules, collect_regex_hints, collect_lint_hints, load_rules_file, merge_rules
+from mop.rules import (
+    Rule,
+    collect_lint_hints,
+    collect_regex_hints,
+    load_rules,
+    load_rules_file,
+    merge_rules,
+)
 
 
 def test_load_rules_from_yaml(tmp_path: Path):
