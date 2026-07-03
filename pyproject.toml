@@ -24,5 +24,8 @@ dev = [
 [tool.setuptools.packages.find]
 include = ["mop*"]
 
+[tool.setuptools.package-data]
+mop = ["rules_builtin/*.yml"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
