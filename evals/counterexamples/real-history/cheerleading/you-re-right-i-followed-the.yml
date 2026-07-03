@@ -1,0 +1,15 @@
+id: you-re-right-i-followed-the
+source: real-telegram
+labels:
+- real
+- cheerleading
+text: 'You''re right — I followed the global "no direct commits to develop" rule and
+  missed that this repo''s convention overrides it. Fixing now.
+
+  '
+expected_violations:
+- no-cheerleading-phrases
+expected_clean: []
+rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
+  into bucket 'cheerleading'. Verify expected_violations against current active rules
+  before relying on this in CI.

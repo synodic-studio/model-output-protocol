@@ -1,0 +1,63 @@
+id: read-it-read-back-of-the
+source: real-telegram
+labels:
+- real
+- cap-overflow
+text: 'Read it. Read-back of the shape, then a few alignment questions.
+
+
+  What I take from it:
+
+
+  1. MOP becomes the message-bus the agent talks to, not a library the bridge calls.
+  The agent''s only way to reach the user is `submitMessage`. MOP evaluates, then
+  either sends (accepted/rewritten) or bounces (rejected with violations).
+
+  2. Reject opens a redo loop: rejected text becomes `pendingMessage`; agent must
+  call `submitJustification(...)` next; LLM re-evaluates message+justification and
+  returns a fresh verdict.
+
+  3. Two hooks: `sessionStart` returns the rules-aware system prompt (telling the
+  agent the protocol); `stop` is a turn-end gate that blocks finish unless `sentMessageThisTurn==true`.
+  Forces "say something this turn."
+
+  4. Per-turn state lives on the MOP instance (`pendingMessage`, `sentMessageThisTurn`).
+
+  5. `getRules(regex?)` is read-only listing for prompt-building or the agent introspecting.
+
+
+  Big shift from today: send-decision moves from bridge into MOP. Today bridge owns
+  Telegram and calls `mop.evaluate` after the fact; in your shape MOP routes to Telegram
+  itself (or to whoever the user-channel is).
+
+
+  Alignment questions before I code:
+
+
+  a. Send mechanism: does MOP call the Telegram bot API directly, or does `sendMessage`
+  return a "deliver this" instruction to the host (bridge) which actually sends? Swift
+  `Result<Bool, Error>` reads like MOP does the network call.
+
+  b. Tool surface: how does the agent invoke `submitMessage`? MCP tool, Claude Code
+  skill/CLI, plain bash command, Python SDK import? "CLI" in your phrasing leans bash,
+  but the shape is more SDK-like.
+
+  c. Channel-agnostic: is "Telegram" hardcoded or is the user-channel a strategy (Telegram
+  today, web later, CLI for testing)? Patchbay''s principle is transport-agnostic.
+
+  d. State scope: MOP instance lifetime — per turn, per session, per agent process?
+  `sentMessageThisTurn` resets when?
+
+  e. Justification loop: bounded? After N rejected→justified→rejected cycles, does
+  MOP force-accept, force-fail, or keep looping?
+
+  f. Multiple messages per turn: API allows N submitMessages — is that intended (e.g.
+  progress + final), or is one-per-turn the norm and N is just permitted?
+
+  '
+expected_violations:
+- length-cap-chat
+expected_clean: []
+rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
+  into bucket 'cap-overflow'. Verify expected_violations against current active rules
+  before relying on this in CI.

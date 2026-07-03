@@ -1,0 +1,46 @@
+id: found-both-docs-two-different-sk
+source: real-telegram
+labels:
+- real
+- cap-overflow
+text: 'Found both docs. Two different sketches: `channels-mcp-plan.md` (claude-attached
+  MCP server, bidirectional) and `ROADMAP-mid-session-comms.md` (inbox file + PostToolUse
+  hook + outbound MCP `send` tool). They overlap a lot.
+
+
+  **Ready, but the SDK changes the picture meaningfully.** The old plan called for
+  spawning a separate stdio MCP server and registering it via `.mcp.json`. With cc-sdk
+  in-process, we can register tools as Python functions directly (`@tool` decorator)
+  — no separate process, no IPC. And there''s a real question worth confirming first:
+  does the SDK''s `query()` allow injecting a new user message into an *in-flight*
+  turn, or only between turns? That answer determines whether we get true mid-flight
+  push (clean) or fall back to the inbox+hook pattern from the other doc (works but
+  is essentially polling). I want to research that before writing a real plan — should
+  be quick.
+
+
+  **Tuning idea — I like it but with a shape change.** Per-chat dials for brevity/technicality/detail
+  are a real productivity win since you use different topics for different modes (audit
+  vs. ship vs. brainstorm). Implementation is tiny — same pattern as `/model`/`/effort`/`/harness`,
+  just appends a snippet to the system prompt. My one pushback: continuous knobs ("technicality
+  7/10") tend to be fuzzy and don''t reliably move model behavior. **Discrete presets**
+  ("terse / balanced / deep-dive / teach-me") give you 80% of the value and are way
+  easier to reason about. We could also have it auto-detect context: a `/audit` style
+  prompt vs. a quick "?" message could nudge the preset. Worth exploring.
+
+
+  **SDK research:** Logged for later. Will do that as a research-only writeup once
+  channels lands.
+
+
+  Order of attack? My recommendation: confirm SDK mid-flight injection (15 min), then
+  channels (real work), then tuning presets (small follow-up), then the SDK-research
+  doc for pi/aider/opencode. Sound right?
+
+  '
+expected_violations:
+- length-cap-chat
+expected_clean: []
+rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
+  into bucket 'cap-overflow'. Verify expected_violations against current active rules
+  before relying on this in CI.

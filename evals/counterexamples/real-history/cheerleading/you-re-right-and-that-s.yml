@@ -1,0 +1,20 @@
+id: you-re-right-and-that-s
+source: real-telegram
+labels:
+- real
+- cheerleading
+text: "You're right, and that's exactly what I just changed it to. The original code\
+  \ used `claude -p` (Claude Code CLI subprocess) which was the wrong tool — it spun\
+  \ up a full agent session for what should be a single `messages.create()` with 32\
+  \ output tokens.\n\nThe current `_eval_llm_haiku` is now a plain SDK call:\n\n```python\n\
+  client = anthropic.Anthropic()\nmsg = client.messages.create(\n    model=\"claude-haiku-4-5-20251001\"\
+  ,\n    max_tokens=32,\n    messages=[{\"role\": \"user\", \"content\": query}],\n\
+  )\n```\n\nNo Claude Code involved. At 32 output tokens per eval, the cost per rule\
+  \ check is roughly $0.00016 (32 tokens × $5/MTok output). You'd need ~18,000 evals\
+  \ to spend $3.\n"
+expected_violations:
+- no-cheerleading-phrases
+expected_clean: []
+rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
+  into bucket 'cheerleading'. Verify expected_violations against current active rules
+  before relying on this in CI.

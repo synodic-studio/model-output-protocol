@@ -1,0 +1,15 @@
+id: shipped-as-77d3215-382-tests-pas
+source: real-telegram
+labels:
+- real
+- clean
+text: 'Shipped as `77d3215`. 382 tests pass. `/restart` to pick it up. Multi-turn
+  replies will now show the last 3 substantive turns joined with blank lines, instead
+  of just the last one.
+
+  '
+expected_violations: []
+expected_clean: []
+rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
+  into bucket 'clean'. Verify expected_violations against current active rules before
+  relying on this in CI.

@@ -1,0 +1,22 @@
+id: looking-the-actual-tcc-problem-y
+source: real-telegram
+labels:
+- real
+- clean
+text: 'Looking. The actual TCC problem: you have **two different uv binaries** (different
+  signatures) on this machine — `~/.local/bin/uv` (the astral copy) and `~/.local/share/mise/installs/uv/0.11.8/...`
+  (the mise-pinned one). Whichever one gets invoked first prompts TCC; the other prompts
+  again later.
+
+
+  Cleanest fix: collapse them. Make `~/.local/bin/uv` a symlink into mise''s shim
+  chain so the system has exactly one uv binary that ever gets exec''d. Anything that
+  hardcodes `~/.local/bin/uv` (incl. the `mcp-agent-mail` plist I just spotted) keeps
+  working but routes through the same mise-pinned binary.
+
+  '
+expected_violations: []
+expected_clean: []
+rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
+  into bucket 'clean'. Verify expected_violations against current active rules before
+  relying on this in CI.

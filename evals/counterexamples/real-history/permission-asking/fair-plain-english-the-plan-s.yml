@@ -1,0 +1,38 @@
+id: fair-plain-english-the-plan-s
+source: real-telegram
+labels:
+- real
+- permission-asking
+text: 'Fair. Plain English:
+
+
+  The plan''s top suggestions, easiest first:
+
+
+  1. Log how many turns each Claude run used and how long it took, so we have data
+  before deciding whether to lower the 500-turn cap. Trivial — one line in the activity
+  log.
+
+
+  2. Escape HTML in the auth server''s error page. Right now if Apple ever returns
+  a weird error string, it gets rendered as raw HTML. Small XSS risk. One-line fix.
+
+
+  3. Build a chaos test for the Claude runner — feed it a fake binary that fails in
+  every nasty way (partial JSON, hangs, exits empty, OOM) and assert the bridge always
+  replies and never leaks a process. Bigger, but locks in the recent debounce/lock
+  work.
+
+
+  4. Bump certifi for routine security hygiene.
+
+
+  I''d grab 1 and 2 together — both tiny, both worth having. Want me to?
+
+  '
+expected_violations:
+- no-permission-asking-for-doable-work
+expected_clean: []
+rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
+  into bucket 'permission-asking'. Verify expected_violations against current active
+  rules before relying on this in CI.

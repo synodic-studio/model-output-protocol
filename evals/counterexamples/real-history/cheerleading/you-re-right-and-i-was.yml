@@ -1,0 +1,37 @@
+id: you-re-right-and-i-was
+source: real-telegram
+labels:
+- real
+- cheerleading
+text: 'You''re right and I was wrong — found it. There are two Telegram bridges in
+  play:
+
+
+  a. **patchbay-relay** (this session, `bridge.py`) — text-only outbound. No `send_photo`/`send_document`
+  wired.
+
+  b. **claude-plugins-official/telegram** MCP plugin — its `reply` tool takes a `files:
+  [absolute paths]` array and calls `sendPhoto`/`sendDocument`. That''s how the .gpx
+  and .md arrived.
+
+
+  So files reach you when a session is routed through the MCP plugin, not patchbay.
+  Right now I''m on patchbay, so I can only do ProtonDrive + inline text. Two ways
+  to fix:
+
+
+  1. Add an outbound-file path to patchbay (mirror the plugin''s `files` param — small
+  feature).
+
+  2. Route this chat through the MCP plugin instead of patchbay.
+
+
+  Which do you want?
+
+  '
+expected_violations:
+- no-cheerleading-phrases
+expected_clean: []
+rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
+  into bucket 'cheerleading'. Verify expected_violations against current active rules
+  before relying on this in CI.

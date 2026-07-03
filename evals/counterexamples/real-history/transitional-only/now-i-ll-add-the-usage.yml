@@ -1,0 +1,14 @@
+id: now-i-ll-add-the-usage
+source: real-telegram
+labels:
+- real
+- transitional-only
+text: 'Now I''ll add the `/usage` command. Inserting before `cmd_ping`:
+
+  '
+expected_violations:
+- no-empty-acknowledgment
+expected_clean: []
+rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
+  into bucket 'transitional-only'. Verify expected_violations against current active
+  rules before relying on this in CI.

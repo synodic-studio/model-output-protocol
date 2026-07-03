@@ -108,8 +108,17 @@ def _run_check(args: argparse.Namespace, rules: list[Rule]) -> int:
     return _render(verdict, rules, as_json=args.as_json)
 
 
+class _MOPArgumentParser(argparse.ArgumentParser):
+    """Custom parser that maps usage errors to EXIT_ERROR instead of exit 2."""
+
+    def error(self, message: str) -> None:
+        self.print_usage(sys.stderr)
+        args = {"prog": self.prog, "message": message}
+        self.exit(EXIT_ERROR, f"%(prog)s: error: %(message)s\n" % args)
+
+
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = _MOPArgumentParser(
         prog="mop", description="MOP — check text against model-output rules."
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -132,8 +141,16 @@ def _build_parser() -> argparse.ArgumentParser:
     rules_p.set_defaults(rules_command="list")
 
     list_p = rules_sub.add_parser("list", help="List all resolved rules.")
+    list_p.add_argument("--rules-dir", type=Path, default=argparse.SUPPRESS)
+    list_p.add_argument("--rules-file", type=Path, default=argparse.SUPPRESS)
+    list_p.add_argument("--json", action="store_true", dest="as_json",
+                        default=argparse.SUPPRESS)
 
     show_p = rules_sub.add_parser("show", help="Show details of one rule.")
+    show_p.add_argument("--rules-dir", type=Path, default=argparse.SUPPRESS)
+    show_p.add_argument("--rules-file", type=Path, default=argparse.SUPPRESS)
+    show_p.add_argument("--json", action="store_true", dest="as_json",
+                        default=argparse.SUPPRESS)
     show_p.add_argument("name", help="Rule name to show")
 
     return parser
@@ -155,11 +172,6 @@ def _run_rules(args: argparse.Namespace, all_rules: list[Rule]) -> int:
             ]
             print(json.dumps(payload))
         else:
-            lines = []
-            for r in all_rules:
-                status = "active" if r.active else "inactive"
-                kind = "lint" if r.lint else r.detector
-                lines.append(f"  {r.name:<42s} {status:<10s} {kind:<14s} {r.source_file}")
             print(f"Rules ({len(all_rules)}):")
             print("  " + "-" * 78)
             print("  " + f"{'Name':<42s} {'Status':<10s} {'Kind':<14s} Source")
@@ -196,7 +208,13 @@ def _run_rules(args: argparse.Namespace, all_rules: list[Rule]) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
-    args = parser.parse_args(argv)
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as e:
+        # argparse error() → self.exit(EXIT_ERROR) raises SystemExit(EXIT_ERROR)
+        if e.code == EXIT_ERROR:
+            return EXIT_ERROR
+        raise  # code 0 (e.g. --help) propagates normally
     try:
         if args.command == "rules":
             rules = resolve_rules(rules_dir=args.rules_dir, rules_file=args.rules_file)
@@ -204,6 +222,6 @@ def main(argv: list[str] | None = None) -> int:
         # check command
         rules = resolve_rules(rules_dir=args.rules_dir, rules_file=args.rules_file)
         return _run_check(args, rules)
-    except Exception as exc:  # argparse errors exit(2) on their own before this
+    except Exception as exc:
         print(f"mop: {exc}", file=sys.stderr)
         return EXIT_ERROR

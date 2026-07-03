@@ -1,0 +1,29 @@
+id: audit-log-reveals-this-was-actua
+source: real-telegram
+labels:
+- real
+- cap-overflow
+text: "Audit log reveals this was actually a different bug than CTB-80f: **I printed\
+  \ the prototypes to my tool's stdout (which only I see), not to my actual text response**.\
+  \ Bridge received the prose-only message — nothing to render, nothing to drop. The\
+  \ audit log paid for itself already: it let us rule out telegramify in ~10 seconds.\n\
+  \nResending the three prototypes as plain text, no code fences:\n\n---\n\n**Prototype\
+  \ A — two bars per period**\n\n5h block:\n  tokens  [████░░░░░░░░] 31.1%  (74.7M/414.1M)\n\
+  \  time    [███████░░░░░] 59.0%  (2h03m left)\n\nWeek (assumed cap 3.0B):\n  tokens\
+  \  [██░░░░░░░░░░] 14.7%  (439.9M/3.0B)\n  time    [████░░░░░░░░] 37.5%\n\n---\n\n\
+  **Prototype B — pace-focused**\n\n5h: 31.1% tokens / 59.0% time → pace 0.53x (behind)\n\
+  \     projected end-of-block: 31.1% of limit (128.7M)\n\nWeek: 14.7% tokens / 37.5%\
+  \ time → pace 0.39x (behind)\n     (cap assumed: 3.0B)\n\n---\n\n**Prototype C —\
+  \ one-liner per period**\n\n5h   31.1% tok · 59.0% time · burn 438.4K/min · 2h03m\
+  \ left\nWeek 14.7% tok · 37.5% time · 439.9M so far\n\n---\n\n**On the weekly cap**:\
+  \ ccusage has no published value. Options:\n1. You give me a number, I put it behind\
+  \ `USAGE_WEEKLY_TOKEN_CAP` env var.\n2. Skip the weekly percent, show only time\
+  \ elapsed + raw tokens.\n3. Derive from past weeks (sketchy).\n\nMy rec: **Prototype\
+  \ A** with option **2** for the weekly row (no fake percent). Or **C** if you want\
+  \ it tight. Which shape, and what about the weekly cap?\n"
+expected_violations:
+- length-cap-chat
+expected_clean: []
+rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
+  into bucket 'cap-overflow'. Verify expected_violations against current active rules
+  before relying on this in CI.

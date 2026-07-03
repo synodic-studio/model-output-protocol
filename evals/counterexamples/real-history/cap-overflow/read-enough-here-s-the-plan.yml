@@ -1,0 +1,58 @@
+id: read-enough-here-s-the-plan
+source: real-telegram
+labels:
+- real
+- cap-overflow
+text: 'Read enough. Here''s the plan for CTB-80f:
+
+
+  **What changes**
+
+  1. `stargate/outbound.py` — add `log_outbound_response(session_key, chunk_index,
+  chunk_total, raw, md, parse_mode, status)`. Writes to the same `outbound/<session_key>.jsonl`,
+  same lock, with `"source": "claude-response"` discriminator plus the bead''s fields
+  (ts, chunk_index/total, raw_text, md_text, parse_mode, http_status). Keep the existing
+  `MAX_ENTRIES` prune behavior so logs don''t grow unbounded.
+
+  2. `bridge.py::_send_response` — inside the existing retry loop, compute `session_key
+  = _session_key(chat_id, thread_id)` once per call, derive `chunk_total` from the
+  loop, and call `log_outbound_response(...)` on (a) successful send and (b) final
+  failure after retries. No signature change. Status = `"ok"` on success, exception
+  class name on failure.
+
+  3. `tests/test_telegram_helpers.py` — add a `TestOutboundAudit` class with two cases:
+  happy-path MarkdownV2 send logs `parse_mode="MarkdownV2"`, and MarkdownV2-fails-then-plain-succeeds
+  logs `parse_mode="plain"`. Use `tmp_path` + `monkeypatch` on `stargate.outbound.OUTBOUND_DIR`
+  so real outbound dir isn''t touched.
+
+
+  **Safety for running bridge**
+
+  - Purely additive. No behavior change to send path, no new imports at module-load
+  time that could fail, no signature changes.
+
+  - Won''t touch the live bridge process. I''ll only edit files, run `uv run pytest
+  tests/ -q` and `uv run ruff check .` and `uv run python validate.py`. No `launchctl`
+  calls, no bridge restart.
+
+  - Bridge picks up changes only on its next restart (which Bryan controls).
+
+
+  **Verification gate before done**
+
+  - Full pytest suite green (329+ tests, zero failures).
+
+  - ruff clean.
+
+  - `validate.py` passes.
+
+
+  Proceeding.
+
+  '
+expected_violations:
+- length-cap-chat
+expected_clean: []
+rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
+  into bucket 'cap-overflow'. Verify expected_violations against current active rules
+  before relying on this in CI.

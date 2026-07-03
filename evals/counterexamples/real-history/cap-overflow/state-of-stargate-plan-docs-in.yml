@@ -1,0 +1,67 @@
+id: state-of-stargate-plan-docs-in
+source: real-telegram
+labels:
+- real
+- cap-overflow
+text: 'State of stargate:
+
+
+  **Plan docs** (in `docs/`):
+
+  - `STARGATE-IMPROVEMENT-PLAN.md` — Opus 4.7 audit from 2026-04-21. The big one.
+  Blockers/Critical/High/Medium/Low taxonomy.
+
+  - `channels-mcp-plan.md` — MCP channel server for live in-flight delivery (the Agent
+  SDK angle).
+
+  - `ROADMAP-mid-session-comms.md` — earlier mid-session-comms approach using PostToolUse
+  hooks + inbox files.
+
+  - `PRODUCT.md`, `apple-auth-implementation.md` — reference docs, not roadmaps.
+
+
+  **Recent commits knock out several of the audit''s blockers:**
+
+  - `e6e79a6` atomic writes + single-instance guard + 40min stall default
+
+  - `5e8b2b6` guardrails for two recurring failure modes
+
+  - `bbbb5d3` outbound audit (CTB-80f closed)
+
+  - `ec12308` /usage with token+time bars
+
+
+  **Still open beads worth flagging:**
+
+  - CTB-die — repair-agent dispatch pattern (P1)
+
+  - CTB-ucw — Phase 2: structured concurrency + SessionState dataclass (P1)
+
+  - CTB-72m — likely stale now that single-instance guard landed
+
+  - CTB-dnc — Phase 3 chaos/property tests (P2)
+
+  - CTB-cyz — pluggable backends per-topic (P2)
+
+  - CTB-3ck, CTB-apy, CTB-r7z, CTB-psz — health probe, env validation, log rotation,
+  certifi bump (P2 hygiene)
+
+
+  No active in-progress plan being executed right now — the improvement plan is the
+  canonical "what''s next" doc, and recent commits have been picking off blockers
+  from it incrementally.
+
+
+  **Multi-tenant deployment**: software run by one operator that serves many separate
+  end-users, where each user''s data/access is isolated from the others — Slack, Notion,
+  GitHub, any SaaS. The "tenants" are the customers. Anthropic''s Max ToS bars that
+  because it''s effectively reselling your subscription. You doing your own thing
+  through Stargate = single-tenant (one tenant: you).
+
+  '
+expected_violations:
+- length-cap-chat
+expected_clean: []
+rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
+  into bucket 'cap-overflow'. Verify expected_violations against current active rules
+  before relying on this in CI.

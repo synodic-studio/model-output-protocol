@@ -1,0 +1,19 @@
+id: now-i-understand-the-bug-fully
+source: real-telegram
+labels:
+- real
+- clean
+text: 'Now I understand the bug fully. The current code byte-slices the **raw** response,
+  then converts each slice independently — that''s why a cut mid-bold makes telegramify
+  produce unbalanced output that Telegram rejects.
+
+
+  Fix: convert the whole response once, split the converted output on paragraph→line→word
+  boundaries, and verify each chunk has balanced markdown entities. Let me implement.
+
+  '
+expected_violations: []
+expected_clean: []
+rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
+  into bucket 'clean'. Verify expected_violations against current active rules before
+  relying on this in CI.

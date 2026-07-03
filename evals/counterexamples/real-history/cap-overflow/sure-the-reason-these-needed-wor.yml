@@ -1,0 +1,40 @@
+id: sure-the-reason-these-needed-wor
+source: real-telegram
+labels:
+- real
+- cap-overflow
+text: 'Sure. The reason these needed work: cc-cli and cc-sdk handle their subprocess
+  differently. With cc-cli, the bridge owns the claude subprocess directly — it has
+  the process handle, so killing it is just `proc.kill()` which sends a signal to
+  the OS. With cc-sdk, the SDK library owns its subprocess internally, hidden from
+  the bridge. There''s no handle to grab. Instead you have to ask the SDK''s running
+  task to cancel itself.
+
+
+  The catch is that the SDK task lives on a different event loop than the bridge''s
+  main loop — it''s spun up on a worker thread when a message comes in. So when /kill
+  arrives on the main loop, you can''t just `await harness.cancel()` because the task
+  you''re trying to cancel is running on a totally separate loop. Python''s `run_coroutine_threadsafe`
+  is the standard way to schedule a coroutine from one loop onto another, with a timeout
+  cap so a wedged worker can''t hang you.
+
+
+  So I added a single helper, `_cancel_session_async`, that handles both cases — for
+  cc-cli it just does the old `proc.kill()`, for cc-sdk it routes through `run_coroutine_threadsafe`.
+  Then /kill, the stall detector, and /restart all go through that one helper instead
+  of poking proc directly. The session state now also tracks which harness is running
+  and which worker loop owns it, set when a turn starts and cleared when it ends.
+
+
+  Graceful shutdown stayed the way it was for cc-cli (it''s a sync signal handler
+  so it can''t await anything), and for cc-sdk it just logs that there''s an active
+  turn — when the bridge process exits, the SDK''s child subprocess inherits the hangup
+  and dies on its own.
+
+  '
+expected_violations:
+- length-cap-chat
+expected_clean: []
+rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
+  into bucket 'cap-overflow'. Verify expected_violations against current active rules
+  before relying on this in CI.

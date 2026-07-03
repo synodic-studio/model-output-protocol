@@ -1,0 +1,45 @@
+id: here-s-where-we-are-phases
+source: real-telegram
+labels:
+- real
+- permission-asking
+text: 'Here''s where we are: phases 0 → 3b are all landed. The harness seam is real,
+  both backends work, `/kill` and the stall detector route through a backend-agnostic
+  cancel, and every activity row carries `harness=` and `harness_requested=` for diffing.
+
+
+  What''s left in the doc is the live soak — pick a topic, `/harness cc-sdk`, run
+  it for a few weeks, compare cc-cli vs cc-sdk on duration, OOM, rate-limit handoffs,
+  empty-success, stall kills. Then flip the default if it''s boring.
+
+
+  My plan, roughly in this order:
+
+
+  1. **Build the soak comparison tool first.** A small script (`scripts/harness_soak.py`
+  or similar) that reads `activity.jsonl`, buckets rows by `harness`, and prints a
+  side-by-side table of the metrics we care about — turn count, p50/p95 duration,
+  OOM count, rate-limit count, timeout count, empty-success count. Without this, "watch
+  for a few weeks" is just eyeballing JSON. With it, the soak is a one-liner I can
+  run anytime and you can ask via `/activity`-style command.
+
+
+  2. **Kick the soak off.** Pick a topic (suggest one of your low-stakes ones), run
+  `/harness cc-sdk` there. Optionally add a tiny `/soak` Telegram command that runs
+  the comparison script and posts the table — saves you sshing in.
+
+
+  3. **Park phase 4/5.** Default flip waits on the soak data. Codex/cursor is out
+  of scope.
+
+
+  The thing actually worth doing right now is #1 — the tooling to make the soak meaningful.
+  Want me to build that?
+
+  '
+expected_violations:
+- no-permission-asking-for-doable-work
+expected_clean: []
+rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
+  into bucket 'permission-asking'. Verify expected_violations against current active
+  rules before relying on this in CI.

@@ -1,0 +1,51 @@
+id: snapshot-a-branches-only-develop
+source: real-telegram
+labels:
+- real
+- permission-asking
+text: '**Snapshot**:
+
+
+  a. **Branches**: only `develop`, in sync with origin. Clean.
+
+  b. **Beads**: 7 open + 17 in_progress (104 closed).
+
+  c. **Docs**: 8 files in `docs/`.
+
+
+  **Quick wins to clear** (low effort, high cleanup):
+
+
+  1. **CTB-72m** (P1 "Conflict 409 storm") — already fixed by `patchbay/singleton.py`
+  + the conflict-storm watcher. Close as done.
+
+  2. **CTB-cyz** (P2 pluggable backends) — shipped as the harness layer (cc-cli/cc-sdk/pi/aider/opencode).
+  Close.
+
+  3. **10 in_progress "aider-deepseek blocked" beads** — stuck dispatches from a deepseek
+  run that never finished. Bulk-close as abandoned unless any are still wanted.
+
+  4. **`docs/RENAME-EXECUTION-PLAN.md`** + **`docs/RENAME-PATCHBAY.md`** — rename
+  done in `41da337`. Move to `docs/archive/` or delete.
+
+
+  **Still real backlog**:
+
+
+  a. P1 in_progress: Apple Sign In (CTB-9pw + CTB-j6z), CI validate.py gate (CTB-a03).
+
+  b. P2 in_progress: /lock + session timeout (CTB-1xa, CTB-42p), code-as-message (CTB-lem).
+
+  c. P3 opens: type hints (CTB-9jc), legacy test files (CTB-112), /totp (CTB-vgb),
+  max_turns review (CTB-sp6), tmux remote_control (CTB-c2i).
+
+
+  Want me to execute the 4 quick wins (close beads, archive docs)?
+
+  '
+expected_violations:
+- no-permission-asking-for-doable-work
+expected_clean: []
+rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
+  into bucket 'permission-asking'. Verify expected_violations against current active
+  rules before relying on this in CI.

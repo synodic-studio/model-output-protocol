@@ -1,0 +1,35 @@
+id: bridge-is-live-pid-33967-exit
+source: real-telegram
+labels:
+- real
+- clean
+text: 'Bridge is live (PID 33967, exit code 0, children present). Changes land only
+  on next restart — your call when.
+
+
+  **CTB-80f done.**
+
+  - `stargate/outbound.py`: new `log_outbound_response()`, source-aware pruning (`MAX_RESPONSE_ENTRIES=50`
+  independent of agent-notification cap), `get_recent_outbound()` filters out response
+  entries so Claude context isn''t polluted.
+
+  - `bridge.py::_send_response`: logs every chunk attempt (success or final failure)
+  with `raw_text`/`md_text`/`parse_mode`/`http_status`/`chunk_index`/`chunk_total`.
+  Audit errors swallowed — cannot affect send behavior.
+
+  - Tests: 4 new in `test_telegram_helpers.py` (MarkdownV2 success, markdown→plain
+  fallback, final failure, multi-chunk+thread_id), 4 new in `test_outbound.py` (success
+  fields, failure fields, source-partitioned cap, `get_recent_outbound` filtering).
+
+  - Full suite: **389 passed**, 0 failures. Ruff clean. `validate.py` clean. Bridge
+  process untouched.
+
+
+  Ready to commit when you say go.
+
+  '
+expected_violations: []
+expected_clean: []
+rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
+  into bucket 'clean'. Verify expected_violations against current active rules before
+  relying on this in CI.

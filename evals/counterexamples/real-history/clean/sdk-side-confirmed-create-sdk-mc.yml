@@ -1,0 +1,16 @@
+id: sdk-side-confirmed-create-sdk-mc
+source: real-telegram
+labels:
+- real
+- clean
+text: 'SDK side: confirmed. `create_sdk_mcp_server` + `@tool` decorator in `claude_agent_sdk`
+  does exactly what we need — in-process, closures over patchbay''s `deliver`. Going
+  to rewrite the doc clean now (resolved Q&A consolidated into a short summary, Swift
+  block reflects Q5/Q6/Q7 decisions).
+
+  '
+expected_violations: []
+expected_clean: []
+rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
+  into bucket 'clean'. Verify expected_violations against current active rules before
+  relying on this in CI.

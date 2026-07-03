@@ -1,0 +1,33 @@
+id: done-a-brew-pin-mise-python
+source: real-telegram
+labels:
+- real
+- completion-no-findings
+text: 'Done.
+
+
+  a. `brew pin mise python@3.13 python@3.14` — applied. Verified via `brew list --pinned`.
+
+  b. Banana''s `heartbeat.py` now defines `TCC_PINNED_FORMULAS` and re-asserts pins
+  on every tick before the daily `brew upgrade`, so a stray `brew unpin` can''t strand
+  us.
+
+  c. Heads-up: the Fanta-gy5 bead (Python pin) was closed but never actually shipped
+  — Python wasn''t pinned until just now. It is now.
+
+  d. uv is not in the pin set because it''s managed by mise (`~/.config/mise/config.toml`),
+  not brew directly.
+
+  e. Intentional upgrade workflow documented in banana''s AGENTS.md and patchbay CLAUDE.md:
+  walk to Mac Mini → unpin → upgrade → re-grant TCC → re-pin.
+
+
+  Both Fanta and patchbay pushed to develop.
+
+  '
+expected_violations:
+- completion-must-have-findings
+expected_clean: []
+rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
+  into bucket 'completion-no-findings'. Verify expected_violations against current
+  active rules before relying on this in CI.

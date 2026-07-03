@@ -1,0 +1,19 @@
+id: yes-remote-control-is-exactly-th
+source: real-telegram
+labels:
+- real
+- cheerleading
+text: 'Yes — `/remote_control` is exactly that: Claude Code''s `claude remote-control`
+  command. Stargate just spawns it in the topic''s project dir and reports the connection
+  info. You''re right that it was rough before; we left the wiring in but it''s tight.
+
+
+  Let me check the relevant context being given to claude, then make the bead.
+
+  '
+expected_violations:
+- no-cheerleading-phrases
+expected_clean: []
+rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
+  into bucket 'cheerleading'. Verify expected_violations against current active rules
+  before relying on this in CI.

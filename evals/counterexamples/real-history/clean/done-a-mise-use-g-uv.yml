@@ -1,0 +1,38 @@
+id: done-a-mise-use-g-uv
+source: real-telegram
+labels:
+- real
+- clean
+text: 'Done:
+
+
+  a. `mise use -g uv@0.11.8` — pinned in `~/.config/mise/config.toml`. Single canonical
+  binary at `~/.local/share/mise/installs/uv/0.11.8/uv-aarch64-apple-darwin/uv`.
+
+  b. `brew uninstall uv` — removed the homebrew copy (no other formula depended on
+  it). Eliminates the brew-vs-mise signature drift that was re-prompting TCC.
+
+  c. Verified mise-served uv runs (`mise exec uv -- uv --version` → 0.11.8).
+
+
+  Did NOT do — needs your hand because zshrc is permission-gated:
+
+
+  1. Add `eval "$(mise activate zsh)"` to `~/.zshrc` so interactive shells resolve
+  `uv` via mise without prefix. Right now a fresh shell finds no `uv` on PATH.
+
+
+  Workaround until you add the line: callers can use `mise exec uv -- …` or `~/.local/share/mise/shims/uv`.
+  For DeskDays, if its build/release script sets PATH explicitly, prepend `~/.local/share/mise/shims`
+  there — that gets you the pinned binary regardless of shell activation.
+
+
+  768 patchbay tests still passing from the earlier work — no regressions from this
+  side mission.
+
+  '
+expected_violations: []
+expected_clean: []
+rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
+  into bucket 'clean'. Verify expected_violations against current active rules before
+  relying on this in CI.

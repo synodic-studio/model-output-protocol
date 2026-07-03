@@ -319,3 +319,44 @@ def test_bare_mop_rules_with_rules_dir(repo, capsys, tmp_path):
     out = capsys.readouterr().out
     assert "alt-rule" in out
     assert "Alt guidance." in out
+
+
+# ---------------------------------------------------------------------------
+# Usage errors must exit 3 (task 1), --json after subcommand (task 2)
+# ---------------------------------------------------------------------------
+
+
+def test_bad_flag_exits_error(repo, capsys):
+    """Typo'd flag must exit EXIT_ERROR (3), not argparse-native exit 2."""
+    code = main(["check", "--bogus"])
+    assert code == EXIT_ERROR
+    # argparse must still print its usage message on stderr
+    err = capsys.readouterr().err
+    assert "mop check" in err or "usage:" in err
+
+
+def test_unknown_subcommand_exits_error(repo, capsys):
+    """Unknown subcommand must exit EXIT_ERROR (3), not exit 2."""
+    code = main(["nonsense"])
+    assert code == EXIT_ERROR
+    err = capsys.readouterr().err
+    assert "nonsense" in err or "usage:" in err
+
+
+def test_rules_list_json_after_subcommand(repo, capsys):
+    """`mop rules list --json` must produce JSON and exit 0."""
+    code = main(["rules", "list", "--json"])
+    assert code == EXIT_ACCEPTED
+    payload = json.loads(capsys.readouterr().out)
+    assert isinstance(payload, list)
+    names = {r["name"] for r in payload}
+    assert "no-fabricated-attribution" in names
+
+
+def test_rules_show_json_after_subcommand(repo, capsys):
+    """`mop rules show <name> --json` must produce JSON and exit 0."""
+    code = main(["rules", "show", "no-fabricated-attribution", "--json"])
+    assert code == EXIT_ACCEPTED
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["name"] == "no-fabricated-attribution"
+    assert payload["detector"] == "llm"

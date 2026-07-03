@@ -1,0 +1,25 @@
+id: you-re-right-i-contradicted-myse
+source: real-telegram
+labels:
+- real
+- cheerleading
+text: 'You''re right, I contradicted myself. Both are bridge changes — the bridge
+  is what assembles and passes the system prompt to `claude -p`, and the bridge is
+  what would do the auto-reinvoke. I shouldn''t have said "neither in the bridge."
+
+
+  Restated:
+
+
+  Both fixes live in the bridge. One is a prompt tweak (cheap, no new code path),
+  the other is a behavior change (auto-reinvoke on empty result, slightly more code).
+  The auto-reinvoke costs one extra query slot when it triggers, but gives you a real
+  reply instead of the placeholder. Worth it?
+
+  '
+expected_violations:
+- no-cheerleading-phrases
+expected_clean: []
+rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
+  into bucket 'cheerleading'. Verify expected_violations against current active rules
+  before relying on this in CI.

@@ -1,0 +1,15 @@
+id: let-me-look-at-the-bridge
+source: real-telegram
+labels:
+- real
+- transitional-only
+text: 'Let me look at the bridge''s post-init replay logic to understand why polling
+  never started.
+
+  '
+expected_violations:
+- no-empty-acknowledgment
+expected_clean: []
+rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
+  into bucket 'transitional-only'. Verify expected_violations against current active
+  rules before relying on this in CI.

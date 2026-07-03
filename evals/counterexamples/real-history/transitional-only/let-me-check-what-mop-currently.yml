@@ -1,0 +1,14 @@
+id: let-me-check-what-mop-currently
+source: real-telegram
+labels:
+- real
+- transitional-only
+text: 'Let me check what MOP currently looks like in patchbay before answering.
+
+  '
+expected_violations:
+- no-empty-acknowledgment
+expected_clean: []
+rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
+  into bucket 'transitional-only'. Verify expected_violations against current active
+  rules before relying on this in CI.

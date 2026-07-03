@@ -1,0 +1,21 @@
+id: found-it-bug-is-real-the
+source: real-telegram
+labels:
+- real
+- permission-asking
+text: 'Found it. Bug is real: the sending code DOES render markdown (telegramify_markdown
+  → MarkdownV2), but the system prompt at bridge.py:195 explicitly tells me "Telegram
+  renders messages as plain text — no markdown" so I''ve been suppressing it.
+
+
+  That''s a prompt bug, not a rendering bug. Want me to flip it to tell Claude to
+  use standard markdown (headers, bold, lists, code fences) since telegramify handles
+  the conversion?
+
+  '
+expected_violations:
+- no-permission-asking-for-doable-work
+expected_clean: []
+rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
+  into bucket 'permission-asking'. Verify expected_violations against current active
+  rules before relying on this in CI.

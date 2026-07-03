@@ -1,0 +1,39 @@
+id: bridge-is-running-the-new-code
+source: real-telegram
+labels:
+- real
+- permission-asking
+text: 'Bridge is running the new code (file mtime 08:30:31, process started 08:30:53).
+  Changes landed:
+
+
+  1. **Hammer in the prompt** — added a HEADLESS-ONLY section to every Claude invocation
+  that names the specific failure: "any command requiring GUI, macOS TCC, or Accessibility/Screen
+  Recording will silently hang you for 30 min until the stall detector kills the process."
+  Explicit blocklist: XCUITest, `xcodebuild test`/`tuist test` with UI tests, `open
+  -a`, `osascript` targeting GUI apps, Simulator boot, Instruments. "If you need one
+  of these, STOP and tell Bryan — don''t try to run it."
+
+
+  2. **Smarter recovery notification** — when the stall detector kills, the Telegram
+  message now names TCC dialog as the first suspected cause and points at System Settings
+  > Privacy & Security. So next time you see the kill message, you''ll know exactly
+  where to look instead of guessing.
+
+
+  3. **Raised STALL_TIMEOUT from 10 → 30 min** (env-overridable). This fixed the separate
+  GravityWell "no output" kills too — CPU-average is a bad signal since Claude is
+  API-bound.
+
+
+  What I didn''t do (worth considering): a PreToolUse hook that outright rejects matching
+  Bash commands before they run, so the model can''t hang even if it ignores the prompt.
+  That''s the belt-and-suspenders version. Lmk if you want me to build it.
+
+  '
+expected_violations:
+- no-permission-asking-for-doable-work
+expected_clean: []
+rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
+  into bucket 'permission-asking'. Verify expected_violations against current active
+  rules before relying on this in CI.

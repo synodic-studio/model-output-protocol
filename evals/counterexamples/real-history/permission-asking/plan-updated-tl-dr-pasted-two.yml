@@ -1,0 +1,26 @@
+id: plan-updated-tl-dr-pasted-two
+source: real-telegram
+labels:
+- real
+- permission-asking
+text: 'Plan updated. TL;DR pasted:
+
+
+  Two blockers: (1) 10-min stall timeout reaps healthy long runs — bump to 30–40 min
+  now, stdout-silence later. (2) **CTB-72m**: no single-instance guard, restart overlap
+  → 1,138+ 409s. Add PID lockfile. Also: non-atomic file writes poison sessions on
+  crash. **Self-healing baked into Phase 1–2**: bridge repairs itself (quarantine
+  corrupt files, kill stale PIDs, retry OOMs, re-deliver failed sends) before ever
+  pinging you. Agent SDK migration parked per your note. One failing test, three ruff
+  errors, one duplicate test name silently hiding another.
+
+
+  Want me to start on §1 now — PID lockfile, stall bump, and the first two self-healers?
+
+  '
+expected_violations:
+- no-permission-asking-for-doable-work
+expected_clean: []
+rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
+  into bucket 'permission-asking'. Verify expected_violations against current active
+  rules before relying on this in CI.
