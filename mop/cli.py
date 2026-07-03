@@ -125,18 +125,16 @@ def _build_parser() -> argparse.ArgumentParser:
     check_p.add_argument("--json", action="store_true", dest="as_json")
 
     rules_p = sub.add_parser("rules", help="List or show rules.")
-    rules_sub = rules_p.add_subparsers(dest="rules_command", required=True)
+    rules_p.add_argument("--rules-dir", type=Path, help="Explicit rules dir (skips discovery)")
+    rules_p.add_argument("--rules-file", type=Path, help="Explicit rules file (skips discovery)")
+    rules_p.add_argument("--json", action="store_true", dest="as_json")
+    rules_sub = rules_p.add_subparsers(dest="rules_command", required=False)
+    rules_p.set_defaults(rules_command="list")
 
     list_p = rules_sub.add_parser("list", help="List all resolved rules.")
-    list_p.add_argument("--rules-dir", type=Path, help="Explicit rules dir (skips discovery)")
-    list_p.add_argument("--rules-file", type=Path, help="Explicit rules file (skips discovery)")
-    list_p.add_argument("--json", action="store_true", dest="as_json")
 
     show_p = rules_sub.add_parser("show", help="Show details of one rule.")
     show_p.add_argument("name", help="Rule name to show")
-    show_p.add_argument("--rules-dir", type=Path, help="Explicit rules dir (skips discovery)")
-    show_p.add_argument("--rules-file", type=Path, help="Explicit rules file (skips discovery)")
-    show_p.add_argument("--json", action="store_true", dest="as_json")
 
     return parser
 
@@ -166,8 +164,14 @@ def _run_rules(args: argparse.Namespace, all_rules: list[Rule]) -> int:
             print("  " + "-" * 78)
             print("  " + f"{'Name':<42s} {'Status':<10s} {'Kind':<14s} Source")
             print("  " + "-" * 78)
-            for line in lines:
-                print(line)
+            for r in all_rules:
+                status = "active" if r.active else "inactive"
+                kind = "lint" if r.lint else r.detector
+                print(f"  {r.name:<42s} {status:<10s} {kind:<14s} {r.source_file}")
+                guidance = (r.guidance or "").strip()
+                if guidance:
+                    wrapped = textwrap.fill(guidance, width=72, initial_indent="      ", subsequent_indent="      ")
+                    print(wrapped)
         return EXIT_ACCEPTED
 
     # rules show

@@ -82,7 +82,16 @@ MOP(
 )
 ```
 
-This keeps MOP transport-agnostic and LLM-agnostic. The reference Haiku evaluator lives in `mop.haiku` (`build_haiku_evaluator`); the host supplies its own `deliver` (Telegram, Slack, web socket, …).
+This keeps MOP transport-agnostic and LLM-agnostic. MOP provides two adapter surfaces:
+
+- **`mop/mcp.py`** (`build_mcp_server`) — stateful MCP server for agent-in-process usage (the primary path for SDK-based harnesses).
+- **`mop/cli.py`** (`main`, `check`) — stateless one-shot adapter for the `mop` CLI command. Supports `mop check` (evaluate text, exit 0/1/2/3) and `mop rules` (inspect the resolved rule set).
+
+The reference evaluator is **`build_litellm_evaluator`** (`mop/evaluators.py`), a litellm-backed, provider-agnostic implementation. Model selection precedence:
+
+  `--model` arg  > `MOP_EVALUATOR_MODEL` env var (litellm `` "provider/model" `` string)  > legacy `MOP_EVALUATOR=deepseek|haiku` alias (kept for existing hosts)  > default `deepseek/deepseek-chat`
+
+The host supplies its own `deliver` (Telegram, Slack, web socket, …).
 
 Lints feed hints to the evaluator; rules produce the verdict. See [`CONTEXT.md`](../CONTEXT.md) for the term definitions.
 
@@ -162,6 +171,7 @@ Lints live in the same flat `rules/` directory as rules. To stage a draft rule w
 - [x] In-process MCP server builder
 - [x] EvalLLMResponse wire schema + verdict_from_eval_response
 - [x] Live verified end-to-end via [patchbay-relay](https://github.com/synodic-studio/patchbay-relay) (Telegram text + photo + document paths)
+- [x] CLI adapter (`mop check` / `mop rules`, `.mop/` discovery, packaged built-ins)
 - [ ] Channels compatibility (audit-only mode)
 - [ ] CC plugin form of Stop hook (for non-SDK harnesses)
 - [ ] Streaming deterministic eval in channel mode

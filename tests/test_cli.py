@@ -216,10 +216,12 @@ def test_rules_list_human(repo, capsys):
     assert "Rules" in out
     assert "no-fabricated-attribution" in out
     assert "links-for-references" in out
+    # Guidance must be present in human output
+    assert "Attribute quotes and claims" in out
 
 
 def test_rules_list_json(repo, capsys):
-    code = main(["rules", "list", "--json"])
+    code = main(["rules", "--json", "list"])
     assert code == EXIT_ACCEPTED
     payload = json.loads(capsys.readouterr().out)
     assert isinstance(payload, list)
@@ -238,7 +240,7 @@ def test_rules_show_human(repo, capsys):
 
 
 def test_rules_show_json(repo, capsys):
-    code = main(["rules", "show", "no-fabricated-attribution", "--json"])
+    code = main(["rules", "--json", "show", "no-fabricated-attribution"])
     assert code == EXIT_ACCEPTED
     payload = json.loads(capsys.readouterr().out)
     assert payload["name"] == "no-fabricated-attribution"
@@ -258,7 +260,7 @@ def test_rules_list_with_explicit_file(repo, capsys, tmp_path):
             {"rules": [{"name": "only-rule", "detector": "llm", "guidance": "g"}]}
         )
     )
-    code = main(["rules", "list", "--rules-file", str(explicit)])
+    code = main(["rules", "--rules-file", str(explicit)])
     assert code == EXIT_ACCEPTED
     out = capsys.readouterr().out
     assert "only-rule" in out
@@ -275,3 +277,45 @@ def test_evaluator_exception_exits_error(repo, monkeypatch, capsys):
     code = main(["check", "text"])
     assert code == EXIT_ERROR
     assert "provider exploded" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# Bare mop rules (defaults to list) must work (spec contract)
+# ---------------------------------------------------------------------------
+
+
+def test_bare_mop_rules_exits_0_and_shows_rule_and_guidance(repo, capsys):
+    """Bare `mop rules` must exit 0 and include a known rule name + guidance."""
+    code = main(["rules"])
+    assert code == EXIT_ACCEPTED
+    out = capsys.readouterr().out
+    assert "no-fabricated-attribution" in out
+    # Guidance text for no-fabricated-attribution
+    assert "Attribute quotes and claims" in out
+
+
+def test_bare_mop_rules_json(repo, capsys):
+    """Bare `mop rules --json` must work and emit valid JSON."""
+    code = main(["rules", "--json"])
+    assert code == EXIT_ACCEPTED
+    payload = json.loads(capsys.readouterr().out)
+    assert isinstance(payload, list)
+    names = {r["name"] for r in payload}
+    assert "no-fabricated-attribution" in names
+    assert "links-for-references" in names
+
+
+def test_bare_mop_rules_with_rules_dir(repo, capsys, tmp_path):
+    """Bare `mop rules --rules-dir X` must work."""
+    alt = tmp_path / "alt_rules"
+    alt.mkdir()
+    (alt / "alt.yml").write_text(
+        yaml.safe_dump(
+            {"rules": [{"name": "alt-rule", "detector": "llm", "guidance": "Alt guidance."}]}
+        )
+    )
+    code = main(["rules", "--rules-dir", str(alt)])
+    assert code == EXIT_ACCEPTED
+    out = capsys.readouterr().out
+    assert "alt-rule" in out
+    assert "Alt guidance." in out

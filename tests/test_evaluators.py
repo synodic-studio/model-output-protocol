@@ -166,6 +166,28 @@ async def test_build_evaluator_works_with_rules_only(monkeypatch):
     assert isinstance(v, Accepted)
 
 
+# ---------------------------------------------------------------------------
+# Parse failure raises instead of fabricating a Rejected
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_parse_failure_raises_runtime_error():
+    """Malformed LLM output must raise RuntimeError, not fabricate Rejected."""
+    message = MagicMock()
+    message.content = "not valid json at all"
+    choice = MagicMock()
+    choice.message = message
+    response = MagicMock()
+    response.choices = [choice]
+    with patch("litellm.acompletion", AsyncMock(return_value=response)), patch(
+        "litellm.supports_response_schema", return_value=False
+    ):
+        evaluator = build_litellm_evaluator(rules=[])
+        with pytest.raises(RuntimeError, match="unparseable output"):
+            await evaluator("hello", [], None)
+
+
 @pytest.mark.asyncio
 async def test_build_evaluator_accepts_model_override():
     fake = _fake_completion({"action": "accept"})

@@ -152,11 +152,10 @@ def build_litellm_evaluator(
         content = response.choices[0].message.content or ""
         try:
             parsed = EvalLLMResponse.model_validate_json(_strip_fences(content))
-        except Exception:
-            # Malformed response — treat as rejected with a system-level error
-            from .types import Rejected
-
-            return Rejected(violations=["__eval_parse_error__"])
+        except Exception as exc:
+            raise RuntimeError(
+                f"Evaluator returned unparseable output: {content[:200]!r}"
+            ) from exc
         return verdict_from_eval_response(parsed, original_text=text)
 
     return evaluate

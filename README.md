@@ -66,6 +66,24 @@ Plus `mop.protocol_prompt(rules)` — a pure function the host concatenates into
 
 See `mop/protocol.py` for the `MOP` class and `mop/mcp.py` for the in-process MCP wiring.
 
+## CLI
+
+MOP ships a standalone `mop` console command for one-shot checks and rule inspection — no MCP server, no agent runtime needed:
+
+```bash
+echo "Sounds great, shipping it!" | mop check --json
+mop check --file draft.md --model anthropic/claude-haiku-4-5-20251001
+mop rules            # resolved active rule set (built-ins + .mop/)
+```
+
+**Exit codes** (for `mop check`): 0 accepted, 1 rewritten, 2 rejected, 3 usage/runtime error. A harness can script around them.
+
+**`.mop/` discovery**: CLI walks up from the current directory looking for a `.mop/` directory containing `*.yml` rule files, stopping at the first directory with `.git` (the repo root). Packaged built-ins form the base layer; local rules are merged on top — same-name replaces, everything else unions, `active: false` silences a built-in.
+
+**Evaluator selection**: set `MOP_EVALUATOR_MODEL` to a litellm `` "provider/model" `` string (e.g. `anthropic/claude-haiku-4-5-20251001`), or pass `--model` to the `check` command. Legacy `MOP_EVALUATOR=deepseek|haiku` is still honored as a fallback alias.
+
+See [`mop/cli.py`](mop/cli.py) for the implementation.
+
 ## Examples
 
 Real Haiku verdicts against three sample agent messages, run through `mop.build_haiku_evaluator` with three rules: `no-permission-asking-for-doable-work`, `no-commit-hashes` ("user has no interest in SHAs"), and `no-environment-vars` ("user does not configure env vars by hand").

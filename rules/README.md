@@ -104,6 +104,41 @@ Older rule files load fine.
    explicit exceptions for the false positives you saw.
    For lints: the regex patterns are the only lever.
 
+## Local project rules (`.mop/`)
+
+In addition to the packaged built-in rules (`mop/rules_builtin/`) and the
+repository `rules/` directory, MOP discovers a **project-local `.mop/`**
+directory by walking up from the current working directory, stopping at
+the first ancestor containing `.git` (the repo root). If found, `.mop/`
+acts as a third layer merged over the built-ins — same YAML schema,
+same merge semantics.
+
+Merge rules (see `mop.rules.merge_rules`):
+
+| Scenario | Result |
+|---|---|
+| Local rule name matches a built-in | Local replaces built-in entirely. |
+| Local rule name is new | Added to the resolved set. |
+| Local `active: false` on a built-in name | Built-in is silenced (dropped from the set). |
+
+**Discovery bypass**: pass `--rules-dir PATH` or `--rules-file PATH` to
+`mop check` or `mop rules` to skip walk-up discovery entirely and use an
+explicit rules source.
+
+**Active built-ins by default** (shipped in `mop/rules_builtin/`):
+
+| Rule | Detector | Active |
+|---|---|---|
+| `no-fabricated-attribution` | llm | yes |
+| `links-for-references` | llm | yes |
+| `format-score-too-high` | deterministic (lint) | yes (always active) |
+
+Rules with `active: false` in the packaged files (e.g.
+`no-completed-without-findings-pings`, `acknowledgment-without-action`,
+`verify-before-asserting`, `no-empty-future-commitments`) are visible
+in Studio but do not reach the evaluator unless a local `.mop/` entry
+re-enables them.
+
 ## Personal overlays
 
 `personal.yml.example` is a template for per-user style entries that are
