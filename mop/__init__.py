@@ -12,7 +12,15 @@ from .format_score import format_score
 from .hooks import protocol_prompt, stop
 from .mcp import build_mcp_server, build_tool_handlers
 from .protocol import MOP
-from .rules import Rule, collect_lint_hints, collect_regex_hints, load_rules, register_builtin_lint
+from .rules import (
+    Rule,
+    collect_lint_hints,
+    collect_regex_hints,
+    load_rules,
+    load_rules_file,
+    merge_rules,
+    register_builtin_lint,
+)
 from .types import (
     Accepted,
     AcceptedFailedOpen,
@@ -58,6 +66,8 @@ __all__ = [
     "JsonlAuditor",
     "Rule",
     "load_rules",
+    "load_rules_file",
+    "merge_rules",
     "collect_lint_hints",
     "collect_regex_hints",
     "Accepted",

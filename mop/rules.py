@@ -45,11 +45,35 @@ class Rule:
     guidance: str
     source_file: str
     lint: bool = False      # True for deterministic pattern checks (advisory)
+    active: bool = True     # False only reachable via include_inactive=True
 
 
 def _entry_is_active(entry: dict) -> bool:
     """Whether a YAML rule entry is active. Missing `active:` defaults to True."""
     return bool(entry.get("active", True))
+
+
+def _rules_from_file(
+    path: Path, *, include_inactive: bool, source_label: str
+) -> list[Rule]:
+    with path.open() as f:
+        data = yaml.safe_load(f) or {}
+    rules: list[Rule] = []
+    for entry in data.get("rules", []):
+        if not include_inactive and not _entry_is_active(entry):
+            continue
+        rules.append(
+            Rule(
+                name=entry["name"],
+                detector=entry["detector"],
+                parameters=entry.get("parameters", {}),
+                guidance=entry.get("guidance", ""),
+                source_file=source_label,
+                lint=bool(entry.get("lint", False)),
+                active=_entry_is_active(entry),
+            )
+        )
+    return rules
 
 
 def load_rules(rules_dir: Path, *, include_inactive: bool = False) -> list[Rule]:
@@ -66,21 +90,13 @@ def load_rules(rules_dir: Path, *, include_inactive: bool = False) -> list[Rule]
     """
     rules: list[Rule] = []
     for path in sorted(rules_dir.rglob("*.yml")):
-        with path.open() as f:
-            data = yaml.safe_load(f) or {}
-        for entry in data.get("rules", []):
-            if not include_inactive and not _entry_is_active(entry):
-                continue
-            rules.append(
-                Rule(
-                    name=entry["name"],
-                    detector=entry["detector"],
-                    parameters=entry.get("parameters", {}),
-                    guidance=entry.get("guidance", ""),
-                    source_file=str(path.relative_to(rules_dir)),
-                    lint=bool(entry.get("lint", False)),
-                )
+        rules.extend(
+            _rules_from_file(
+                path,
+                include_inactive=include_inactive,
+                source_label=str(path.relative_to(rules_dir)),
             )
+        )
     for name, (guidance, check) in _BUILTIN_LINTS.items():
         rules.append(
             Rule(
@@ -93,6 +109,31 @@ def load_rules(rules_dir: Path, *, include_inactive: bool = False) -> list[Rule]
             )
         )
     return rules
+
+
+def load_rules_file(path: Path, *, include_inactive: bool = False) -> list[Rule]:
+    """Load rules from a single YAML file.
+
+    Unlike ``load_rules``, does NOT append registered builtin lints —
+    callers composing layers get those from the base layer and rely on
+    ``merge_rules`` name-dedupe.
+    """
+    return _rules_from_file(
+        path, include_inactive=include_inactive, source_label=str(path)
+    )
+
+
+def merge_rules(base: list[Rule], overlay: list[Rule]) -> list[Rule]:
+    """Two-layer merge: overlay wins by name, everything else unions.
+
+    Inactive rules are dropped AFTER the merge, so an overlay entry with
+    ``active: false`` silences a same-named base rule. Load the overlay
+    with ``include_inactive=True`` for that to work.
+    """
+    merged: dict[str, Rule] = {r.name: r for r in base}
+    for rule in overlay:
+        merged[rule.name] = rule
+    return [r for r in merged.values() if r.active]
 
 
 def _rule_matches(rule: Rule, text: str) -> bool:

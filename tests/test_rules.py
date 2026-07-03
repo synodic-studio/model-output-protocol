@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from mop.rules import Rule, load_rules, collect_regex_hints, collect_lint_hints
+from mop.rules import Rule, load_rules, collect_regex_hints, collect_lint_hints, load_rules_file, merge_rules
 
 
 def test_load_rules_from_yaml(tmp_path: Path):
@@ -336,3 +336,80 @@ def test_collect_regex_hints_ignores_llm_rules():
     ]
     hints = collect_regex_hints("anything", rules)
     assert hints == []
+
+
+# ---------------------------------------------------------------------------
+# Rule.active field, single-file loading, layered merge
+# ---------------------------------------------------------------------------
+
+
+def _write_rules_yml(path, entries):
+    import yaml
+
+    path.write_text(yaml.safe_dump({"rules": entries}))
+
+
+def test_load_rules_populates_active_field(tmp_path):
+    _write_rules_yml(
+        tmp_path / "r.yml",
+        [
+            {"name": "on-rule", "detector": "llm", "guidance": "g"},
+            {"name": "off-rule", "detector": "llm", "guidance": "g", "active": False},
+        ],
+    )
+    rules = load_rules(tmp_path, include_inactive=True)
+    by_name = {r.name: r for r in rules}
+    assert by_name["on-rule"].active is True
+    assert by_name["off-rule"].active is False
+
+
+def test_load_rules_file_reads_single_file(tmp_path):
+    target = tmp_path / "solo.yml"
+    _write_rules_yml(target, [{"name": "solo-rule", "detector": "llm", "guidance": "g"}])
+    # A sibling file that must NOT be picked up:
+    _write_rules_yml(
+        tmp_path / "other.yml", [{"name": "other-rule", "detector": "llm", "guidance": "g"}]
+    )
+    rules = load_rules_file(target)
+    names = [r.name for r in rules]
+    assert "solo-rule" in names
+    assert "other-rule" not in names
+
+
+def test_load_rules_file_does_not_append_builtin_lints(tmp_path):
+    target = tmp_path / "solo.yml"
+    _write_rules_yml(target, [{"name": "solo-rule", "detector": "llm", "guidance": "g"}])
+    rules = load_rules_file(target)
+    assert all(r.source_file != "<builtin>" for r in rules)
+
+
+def test_merge_overlay_replaces_same_name():
+    base = [Rule("a", "llm", {}, "base guidance", "base.yml")]
+    overlay = [Rule("a", "llm", {}, "local guidance", "local.yml")]
+    merged = merge_rules(base, overlay)
+    assert len(merged) == 1
+    assert merged[0].guidance == "local guidance"
+
+
+def test_merge_unions_distinct_names():
+    base = [Rule("a", "llm", {}, "g", "base.yml")]
+    overlay = [Rule("b", "llm", {}, "g", "local.yml")]
+    merged = merge_rules(base, overlay)
+    assert [r.name for r in merged] == ["a", "b"]
+
+
+def test_merge_local_inactive_silences_builtin():
+    base = [Rule("a", "llm", {}, "g", "base.yml")]
+    overlay = [Rule("a", "llm", {}, "g", "local.yml", active=False)]
+    merged = merge_rules(base, overlay)
+    assert merged == []
+
+
+def test_merge_dedupes_builtin_lints():
+    """load_rules appends registered builtin lints per call; merge dedupes them."""
+    lint = Rule(
+        "format-score-too-high", "deterministic", {"type": "builtin_lint"},
+        "g", "<builtin>", lint=True,
+    )
+    merged = merge_rules([lint], [lint])
+    assert len(merged) == 1
