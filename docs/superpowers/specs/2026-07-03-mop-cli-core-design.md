@@ -42,20 +42,30 @@ repo.
   streaming/hook interception.
 - **Proactive rule-context injection into agent system prompts.**
   Extending `protocol_prompt()` to embed rule content is a separate,
-  smaller piece of work, orthogonal to this one.
+  smaller piece of work, orthogonal to this one. (The `mop rules`
+  subcommand below covers the *exposure* half — a harness can already
+  shell out for the resolved rule set — but the injection mechanics
+  stay out of scope.)
 
 ## Architecture
 
 A new module, `mop/cli.py`, exposes:
 
-- `check(text: str, rules: list[Rule], evaluator: Evaluator, *, justification: str | None = None) -> Verdict` —
-  pure function. Calls `mop.rules.collect_lint_hints(text, rules)` for
-  advisory hints, then `evaluator(text, hints, justification)`, and
-  returns the raw `Verdict`. No I/O, no process state.
+- `async def check(text: str, rules: list[Rule], evaluator: Evaluator, *, justification: str | None = None) -> Verdict` —
+  pure async function (the `Evaluator` type is `Awaitable`-returning).
+  Calls `mop.rules.collect_lint_hints(text, rules)` for advisory hints,
+  then `await evaluator(text, hints, justification)`, and returns the
+  raw `Verdict`. No I/O, no process state.
 - `main()` — thin argparse wrapper that resolves rules (see "Rule
   discovery"), builds an evaluator (see "Evaluator backend"), reads
-  input, calls `check()`, and renders output per the "Output contract"
-  below.
+  input, drives `check()` via `asyncio.run()`, and renders output per
+  the "Output contract" below.
+
+Note on the double `rules` surface: evaluators bake the rule set into
+their prompt at build time (`build_*_evaluator(rules=...)`), while
+`check()` also takes `rules` for lint-hint collection and guidance
+lookup. `main()` must build both from the *same* resolved rule set;
+`check()` documents this requirement for direct (library) callers.
 
 This makes the CLI one of several **adapters** over the same core the
 MCP path already uses:
@@ -86,7 +96,18 @@ Console-script entry point `mop`, added to `pyproject.toml`
 ```
 mop check [TEXT] [--file PATH] [--rules-dir PATH] [--rules-file PATH]
           [--rule NAME] [--model MODEL] [--justify REASON] [--json]
+mop rules [--rules-dir PATH] [--rules-file PATH] [--json]
 ```
+
+`mop rules` prints the resolved active rule set — post-discovery,
+post-merge, exactly what `mop check` would evaluate against. Default
+output is name + guidance per rule; `--json` emits the full rule
+objects. This directly serves the original "pull all active rules at
+once to prime agent context" need at the *exposure* level (a harness
+can shell out to `mop rules` and paste the result into a system
+prompt); the injection *mechanics* remain a non-goal here. It costs
+almost nothing once discovery + merge exist, and it's the natural
+debugging tool for "why did/didn't rule X fire."
 
 **Input** (exactly one source; error if zero or more than one given):
 - stdin (primary — `echo "$TEXT" | mop check`, robust for arbitrary
@@ -182,6 +203,15 @@ by its own per-provider convention.
   `pydantic-ai[anthropic]` is a candidate for removal if
   `mop/evaluators.py` was its only consumer in this package — verify
   during implementation, don't assume.
+- **API-key isolation caveat:** the current builders accept
+  `MOP_`-prefixed key vars (`MOP_ANTHROPIC_API_KEY`,
+  `MOP_DEEPSEEK_API_KEY`) precisely so the evaluator's key can be kept
+  out of env inherited by spawned agent subprocesses. litellm only
+  reads standard provider names (`ANTHROPIC_API_KEY`, etc.). Preserve
+  the isolation property with a small shim: before calling litellm, if
+  `MOP_<PROVIDER>_API_KEY` is set for the selected model's provider,
+  pass it explicitly as `api_key=` rather than exporting it. Don't
+  silently drop this convention — patchbay-relay may depend on it.
 
 ## Rule discovery
 
@@ -205,7 +235,10 @@ Same shape applies here.
   the base layer; a discovered or explicitly-passed local rule set
   layers on top. Same-name entry replaces the built-in; everything
   else unions. `active: false` in a local rule can silence a built-in
-  by name. This is the two-layer subset of the precedence idea already
+  by name. Implementation caveat: `load_rules()` auto-appends
+  registered builtin lints (`register_builtin_lint`) on *every* call,
+  so calling it once per layer duplicates them — the merge must dedupe
+  by name (last layer wins), which handles this for free. This is the two-layer subset of the precedence idea already
   sketched in `docs/patchbay/vale-style-example-4-merge-semantics.md`
   — not the full 5-layer system, just built-in vs. local.
 - **Packaging consequence:** built-in rules must ship inside the
@@ -225,7 +258,9 @@ Same shape applies here.
   behavior (built-in-only, local-override-by-name, local-addition).
   Include a case asserting the rejected `--json` output resolves
   `{name, guidance}` pairs correctly from the loaded rule set, not just
-  bare violation names.
+  bare violation names. Also cover `mop rules`: output reflects the
+  merged set (built-in + local override), and builtin lints appear
+  exactly once.
 - `tests/test_evaluators.py` updated to mock litellm instead of
   pydantic-ai agents.
 - Add a discovery test fixture: nested temp directories with a `.git`
