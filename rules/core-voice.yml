@@ -28,6 +28,8 @@ rules:
     active: false
     detector: llm
     description: Don't invent quotes, citations, or attribute claims to people
+    guidance: |
+      Attribute quotes and claims only to sources present in the user's input or verifiable context. Never invent quotes, citations, or attribute claims to named people.
     parameters:
       prompt: |
         Does this message attribute a quote or specific claim to a named
@@ -41,6 +43,8 @@ rules:
     active: false
     detector: llm
     description: External references should be clickable URLs
+    guidance: |
+      When referencing an external resource (PR, issue, doc, dashboard, external service), include the clickable URL. Local code references (functions, files in the working tree) don't need links.
     parameters:
       prompt: |
         Does this message reference an external resource (PR, issue, doc,

@@ -1,11 +1,6 @@
-# Core voice rules — enduring style enforcement.
-#
-# Rules here apply to every user by default and are NOT expected to deprecate
-# as models improve. They reflect truth and communication universals, not
-# model-era artifacts.
-#
-# All rules are restored with `active: false` after a prior simplification
-# pass deleted them outright. Flip the toggle in MOP Studio to enable any.
+# Packaged copy of rules/core-voice.yml. Content is pinned to the
+# original by a sync test; only `active:` flags may differ, and they
+# define the CLI's out-of-the-box defaults.
 
 rules:
 
@@ -25,9 +20,11 @@ rules:
       all pings.
 
   - name: no-fabricated-attribution
-    active: false
+    active: true
     detector: llm
     description: Don't invent quotes, citations, or attribute claims to people
+    guidance: |
+      Attribute quotes and claims only to sources present in the user's input or verifiable context. Never invent quotes, citations, or attribute claims to named people.
     parameters:
       prompt: |
         Does this message attribute a quote or specific claim to a named
@@ -38,9 +35,11 @@ rules:
       Quote only what's in source material.
 
   - name: links-for-references
-    active: false
+    active: true
     detector: llm
     description: External references should be clickable URLs
+    guidance: |
+      When referencing an external resource (PR, issue, doc, dashboard, external service), include the clickable URL. Local code references (functions, files in the working tree) don't need links.
     parameters:
       prompt: |
         Does this message reference an external resource (PR, issue, doc,

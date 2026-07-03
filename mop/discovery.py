@@ -21,27 +21,10 @@ from .rules import Rule, load_rules, load_rules_file, merge_rules
 
 
 def load_builtin_rules() -> list[Rule]:
-    """Load the rule files packaged in mop/rules_builtin/.
-
-    All packaged rules are returned as active, allowing local rules to
-    deactivate them if needed. Built-in lints are also appended.
-    """
+    """Load the rule files packaged in mop/rules_builtin/."""
     source = files("mop") / "rules_builtin"
     with as_file(source) as dir_path:
-        rules = load_rules(Path(dir_path), include_inactive=True)
-    # Activate all builtin rules so they're available to be overridden locally
-    return [
-        Rule(
-            name=r.name,
-            detector=r.detector,
-            parameters=r.parameters,
-            guidance=r.guidance,
-            source_file=r.source_file,
-            lint=r.lint,
-            active=True,
-        )
-        for r in rules
-    ]
+        return load_rules(Path(dir_path))
 
 
 def find_local_rules_dir(start: Path | None = None) -> Path | None:

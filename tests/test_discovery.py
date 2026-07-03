@@ -1,6 +1,5 @@
 """Rule discovery: packaged built-ins, .mop/ walk-up, layered resolution."""
 
-import filecmp
 from pathlib import Path
 
 import yaml
@@ -26,19 +25,41 @@ def test_builtin_rules_load_nonempty():
     rules = load_builtin_rules()
     assert rules, "packaged built-in rules should not be empty"
     names = {r.name for r in rules}
-    assert "no-fabricated-attribution" in names      # from core-voice.yml
-    assert "verify-before-asserting" in names        # from core-behavior.yml
+    assert "no-fabricated-attribution" in names      # active in packaged core-voice.yml
+    assert "links-for-references" in names           # active in packaged core-voice.yml
+    assert "verify-before-asserting" not in names    # inactive, dropped by load_rules
 
 
 def test_builtin_copies_stay_in_sync_with_rules_dir():
-    """Guard against drift between rules/ (dev corpus) and packaged copies."""
+    """Guard against drift between rules/ (dev corpus) and packaged copies.
+
+    The packaged copies may differ from the originals ONLY in their
+    `active:` flags (those define the CLI's out-of-the-box defaults).
+    Everything else — rule names and all other fields — must match.
+    """
     for name in ("core-behavior.yml", "core-voice.yml"):
-        original = REPO_ROOT / "rules" / name
-        packaged = REPO_ROOT / "mop" / "rules_builtin" / name
-        assert filecmp.cmp(original, packaged, shallow=False), (
-            f"{name}: mop/rules_builtin/ copy differs from rules/ original — "
-            "re-copy it (cp rules/{name} mop/rules_builtin/{name})"
+        original = yaml.safe_load((REPO_ROOT / "rules" / name).read_text())
+        packaged = yaml.safe_load(
+            (REPO_ROOT / "mop" / "rules_builtin" / name).read_text()
         )
+        original_rules = {r["name"]: r for r in original["rules"]}
+        packaged_rules = {r["name"]: r for r in packaged["rules"]}
+        assert original_rules.keys() == packaged_rules.keys(), (
+            f"{name}: mop/rules_builtin/ copy defines different rules than the "
+            f"rules/ original — re-copy it (cp rules/{name} mop/rules_builtin/{name}) "
+            "and re-apply the packaged active flags"
+        )
+        for rule_name, orig in original_rules.items():
+            orig_no_active = {k: v for k, v in orig.items() if k != "active"}
+            pkg_no_active = {
+                k: v for k, v in packaged_rules[rule_name].items() if k != "active"
+            }
+            assert orig_no_active == pkg_no_active, (
+                f"{name}: rule '{rule_name}' in mop/rules_builtin/ differs from "
+                f"the rules/ original beyond the active flag — re-copy it "
+                f"(cp rules/{name} mop/rules_builtin/{name}) and re-apply the "
+                "packaged active flags"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +94,12 @@ def test_stops_at_repo_root(tmp_path):
 def test_returns_none_without_mop_dir(tmp_path):
     (tmp_path / ".git").mkdir()
     assert find_local_rules_dir(tmp_path) is None
+
+
+def test_returns_none_without_git_or_mop_anywhere(tmp_path):
+    nested = tmp_path / "a" / "b"
+    nested.mkdir(parents=True)
+    assert find_local_rules_dir(nested) is None
 
 
 # ---------------------------------------------------------------------------
