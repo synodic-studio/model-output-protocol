@@ -7,6 +7,7 @@ and register the Stop hook via the host's runtime.
 """
 
 from .audit import Auditor, JsonlAuditor
+from .cli import check
 from .discovery import find_local_rules_dir, load_builtin_rules, resolve_rules
 from .evaluators import build_evaluator, build_litellm_evaluator
 from .format_score import format_score
@@ -61,6 +62,7 @@ __all__ = [
     "build_tool_handlers",
     "build_evaluator",
     "build_litellm_evaluator",
+    "check",
     "protocol_prompt",
     "stop",
     "Auditor",
