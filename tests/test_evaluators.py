@@ -1,175 +1,177 @@
-"""Evaluator wrappers — tests the ADAPTERS, not live LLMs."""
+"""Evaluator wrapper — tests the litellm ADAPTER, not live LLMs."""
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from mop import build_deepseek_evaluator, build_evaluator, build_haiku_evaluator
-from mop.types import Accepted, EvalLLMResponse, Rejected, Rewritten
+from mop import build_evaluator, build_litellm_evaluator
+from mop.evaluators import DEFAULT_MODEL, resolve_model
+from mop.types import Accepted, Rejected, Rewritten
 
 
-def _fake_agent_returning(response: EvalLLMResponse):
-    """Helper: build a MagicMock that mimics pydantic-ai's Agent.run result shape."""
-    agent = MagicMock()
-    agent.run = AsyncMock(return_value=MagicMock(output=response))
-    return agent
+def _fake_completion(payload: dict):
+    """Mimic litellm.acompletion's response shape: choices[0].message.content."""
+    message = MagicMock()
+    message.content = json.dumps(payload)
+    choice = MagicMock()
+    choice.message = message
+    response = MagicMock()
+    response.choices = [choice]
+    return AsyncMock(return_value=response)
+
+
+def _patched(payload: dict):
+    """Patch acompletion + force the json_object fallback path."""
+    return (
+        patch("litellm.acompletion", _fake_completion(payload)),
+        patch("litellm.supports_response_schema", return_value=False),
+    )
 
 
 # ---------------------------------------------------------------------------
-# Haiku adapter
+# Verdict mapping
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_haiku_returns_accepted_when_llm_says_accept():
-    fake_agent = _fake_agent_returning(EvalLLMResponse(action="accept"))
-    with patch("mop.evaluators._build_haiku_agent", return_value=fake_agent):
-        evaluator = build_haiku_evaluator(rules=[])
+async def test_returns_accepted_when_llm_says_accept():
+    p1, p2 = _patched({"action": "accept"})
+    with p1, p2:
+        evaluator = build_litellm_evaluator(rules=[])
         v = await evaluator("hello", [], None)
     assert isinstance(v, Accepted)
 
 
 @pytest.mark.asyncio
-async def test_haiku_returns_rewritten_with_payload():
-    fake_agent = _fake_agent_returning(
-        EvalLLMResponse(action="rewrite", rewritten="cleaned up")
-    )
-    with patch("mop.evaluators._build_haiku_agent", return_value=fake_agent):
-        evaluator = build_haiku_evaluator(rules=[])
+async def test_returns_rewritten_with_payload():
+    p1, p2 = _patched({"action": "rewrite", "rewritten": "cleaned up"})
+    with p1, p2:
+        evaluator = build_litellm_evaluator(rules=[])
         v = await evaluator("messy", [], None)
     assert isinstance(v, Rewritten)
     assert v.rewritten == "cleaned up"
 
 
 @pytest.mark.asyncio
-async def test_haiku_returns_rejected_with_violations():
-    fake_agent = _fake_agent_returning(
-        EvalLLMResponse(action="reject", violations=["rule-x"])
-    )
-    with patch("mop.evaluators._build_haiku_agent", return_value=fake_agent):
-        evaluator = build_haiku_evaluator(rules=[])
+async def test_returns_rejected_with_violations():
+    p1, p2 = _patched({"action": "reject", "violations": ["rule-x"]})
+    with p1, p2:
+        evaluator = build_litellm_evaluator(rules=[])
         v = await evaluator("bad", [], None)
     assert isinstance(v, Rejected)
     assert v.violations == ["rule-x"]
 
 
 @pytest.mark.asyncio
-async def test_haiku_raises_runtime_error_when_no_api_key(monkeypatch):
-    monkeypatch.delenv("MOP_ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    evaluator = build_haiku_evaluator(rules=[])
-    with pytest.raises(RuntimeError, match="API key"):
-        await evaluator("anything", [], None)
-
-
-# ---------------------------------------------------------------------------
-# DeepSeek adapter
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_deepseek_returns_accepted_when_llm_says_accept():
-    fake_agent = _fake_agent_returning(EvalLLMResponse(action="accept"))
-    with patch("mop.evaluators._build_deepseek_agent", return_value=fake_agent):
-        evaluator = build_deepseek_evaluator(rules=[])
+async def test_strips_markdown_fences_from_response():
+    message = MagicMock()
+    message.content = '```json\n{"action": "accept"}\n```'
+    choice = MagicMock()
+    choice.message = message
+    response = MagicMock()
+    response.choices = [choice]
+    with patch("litellm.acompletion", AsyncMock(return_value=response)), patch(
+        "litellm.supports_response_schema", return_value=False
+    ):
+        evaluator = build_litellm_evaluator(rules=[])
         v = await evaluator("hello", [], None)
     assert isinstance(v, Accepted)
 
 
-@pytest.mark.asyncio
-async def test_deepseek_returns_rewritten_with_payload():
-    fake_agent = _fake_agent_returning(
-        EvalLLMResponse(action="rewrite", rewritten="cleaned up")
-    )
-    with patch("mop.evaluators._build_deepseek_agent", return_value=fake_agent):
-        evaluator = build_deepseek_evaluator(rules=[])
-        v = await evaluator("messy", [], None)
-    assert isinstance(v, Rewritten)
-    assert v.rewritten == "cleaned up"
-
-
-@pytest.mark.asyncio
-async def test_deepseek_returns_rejected_with_violations():
-    fake_agent = _fake_agent_returning(
-        EvalLLMResponse(action="reject", violations=["rule-x"])
-    )
-    with patch("mop.evaluators._build_deepseek_agent", return_value=fake_agent):
-        evaluator = build_deepseek_evaluator(rules=[])
-        v = await evaluator("bad", [], None)
-    assert isinstance(v, Rejected)
-    assert v.violations == ["rule-x"]
-
-
-@pytest.mark.asyncio
-async def test_deepseek_raises_runtime_error_when_no_api_key(monkeypatch):
-    monkeypatch.delenv("MOP_DEEPSEEK_API_KEY", raising=False)
-    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-    evaluator = build_deepseek_evaluator(rules=[])
-    with pytest.raises(RuntimeError, match="API key"):
-        await evaluator("anything", [], None)
-
-
 # ---------------------------------------------------------------------------
-# Factory dispatch (build_evaluator)
+# Model resolution
 # ---------------------------------------------------------------------------
 
 
-def test_build_evaluator_defaults_to_deepseek(monkeypatch):
-    """No MOP_EVALUATOR set should use deepseek."""
+def test_resolve_model_defaults(monkeypatch):
+    monkeypatch.delenv("MOP_EVALUATOR_MODEL", raising=False)
     monkeypatch.delenv("MOP_EVALUATOR", raising=False)
-    fn = build_evaluator(rules=[])
-    # Verify by calling it with a patched _build_deepseek_agent
-    fake_agent = _fake_agent_returning(EvalLLMResponse(action="accept"))
-    from mop import evaluators as ev
-    with patch("mop.evaluators._build_deepseek_agent", return_value=fake_agent):
-        import asyncio
-        v = asyncio.run(fn("hello", [], None))
-    assert isinstance(v, Accepted)
+    assert resolve_model() == DEFAULT_MODEL
 
 
-def test_build_evaluator_deepseek_when_envar_set(monkeypatch):
+def test_resolve_model_explicit_arg_wins(monkeypatch):
+    monkeypatch.setenv("MOP_EVALUATOR_MODEL", "anthropic/claude-haiku-4-5-20251001")
+    assert resolve_model("openai/gpt-4o-mini") == "openai/gpt-4o-mini"
+
+
+def test_resolve_model_env_var(monkeypatch):
+    monkeypatch.delenv("MOP_EVALUATOR", raising=False)
+    monkeypatch.setenv("MOP_EVALUATOR_MODEL", "anthropic/claude-haiku-4-5-20251001")
+    assert resolve_model() == "anthropic/claude-haiku-4-5-20251001"
+
+
+def test_resolve_model_legacy_deepseek_alias(monkeypatch):
+    monkeypatch.delenv("MOP_EVALUATOR_MODEL", raising=False)
     monkeypatch.setenv("MOP_EVALUATOR", "deepseek")
-    fn = build_evaluator(rules=[])
-    fake_agent = _fake_agent_returning(EvalLLMResponse(action="accept"))
-    with patch("mop.evaluators._build_deepseek_agent", return_value=fake_agent):
-        import asyncio
-        v = asyncio.run(fn("hello", [], None))
-    assert isinstance(v, Accepted)
+    assert resolve_model() == "deepseek/deepseek-chat"
 
 
-def test_build_evaluator_haiku_when_envar_set(monkeypatch):
+def test_resolve_model_legacy_haiku_alias(monkeypatch):
+    monkeypatch.delenv("MOP_EVALUATOR_MODEL", raising=False)
     monkeypatch.setenv("MOP_EVALUATOR", "haiku")
-    fn = build_evaluator(rules=[])
-    fake_agent = _fake_agent_returning(EvalLLMResponse(action="accept"))
-    with patch("mop.evaluators._build_haiku_agent", return_value=fake_agent):
-        import asyncio
-        v = asyncio.run(fn("hello", [], None))
-    assert isinstance(v, Accepted)
+    assert resolve_model() == "anthropic/claude-haiku-4-5-20251001"
 
 
-def test_build_evaluator_raises_on_unknown_backend(monkeypatch):
+def test_resolve_model_unknown_legacy_raises(monkeypatch):
+    monkeypatch.delenv("MOP_EVALUATOR_MODEL", raising=False)
     monkeypatch.setenv("MOP_EVALUATOR", "gpt-4")
     with pytest.raises(ValueError, match="Unknown MOP_EVALUATOR"):
-        build_evaluator(rules=[])
+        resolve_model()
+
+
+# ---------------------------------------------------------------------------
+# API-key isolation shim
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_build_evaluator_deepseek_runs(monkeypatch):
-    """Integration check: factory returns a callable that works when patched."""
-    monkeypatch.setenv("MOP_EVALUATOR", "deepseek")
-    fake_agent = _fake_agent_returning(EvalLLMResponse(action="accept"))
-    with patch("mop.evaluators._build_deepseek_agent", return_value=fake_agent):
+async def test_mop_prefixed_api_key_passed_explicitly(monkeypatch):
+    monkeypatch.setenv("MOP_DEEPSEEK_API_KEY", "sk-isolated")
+    fake = _fake_completion({"action": "accept"})
+    with patch("litellm.acompletion", fake), patch(
+        "litellm.supports_response_schema", return_value=False
+    ):
+        evaluator = build_litellm_evaluator(rules=[], model="deepseek/deepseek-chat")
+        await evaluator("hello", [], None)
+    assert fake.call_args.kwargs["api_key"] == "sk-isolated"
+
+
+@pytest.mark.asyncio
+async def test_no_api_key_kwarg_when_unset(monkeypatch):
+    monkeypatch.delenv("MOP_DEEPSEEK_API_KEY", raising=False)
+    fake = _fake_completion({"action": "accept"})
+    with patch("litellm.acompletion", fake), patch(
+        "litellm.supports_response_schema", return_value=False
+    ):
+        evaluator = build_litellm_evaluator(rules=[], model="deepseek/deepseek-chat")
+        await evaluator("hello", [], None)
+    assert "api_key" not in fake.call_args.kwargs
+
+
+# ---------------------------------------------------------------------------
+# Factory (build_evaluator) — backward-compatible entrypoint
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_build_evaluator_works_with_rules_only(monkeypatch):
+    """patchbay-relay calls build_evaluator(rules=...) — must keep working."""
+    monkeypatch.delenv("MOP_EVALUATOR_MODEL", raising=False)
+    monkeypatch.delenv("MOP_EVALUATOR", raising=False)
+    p1, p2 = _patched({"action": "accept"})
+    with p1, p2:
         evaluator = build_evaluator(rules=[])
         v = await evaluator("hello", [], None)
     assert isinstance(v, Accepted)
 
 
 @pytest.mark.asyncio
-async def test_build_evaluator_haiku_runs(monkeypatch):
-    """Integration check: factory returns a callable that works when patched."""
-    monkeypatch.setenv("MOP_EVALUATOR", "haiku")
-    fake_agent = _fake_agent_returning(EvalLLMResponse(action="accept"))
-    with patch("mop.evaluators._build_haiku_agent", return_value=fake_agent):
-        evaluator = build_evaluator(rules=[])
-        v = await evaluator("hello", [], None)
-    assert isinstance(v, Accepted)
+async def test_build_evaluator_accepts_model_override():
+    fake = _fake_completion({"action": "accept"})
+    with patch("litellm.acompletion", fake), patch(
+        "litellm.supports_response_schema", return_value=False
+    ):
+        evaluator = build_evaluator(rules=[], model="openai/gpt-4o-mini")
+        await evaluator("hello", [], None)
+    assert fake.call_args.kwargs["model"] == "openai/gpt-4o-mini"

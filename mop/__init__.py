@@ -7,7 +7,7 @@ and register the Stop hook via the host's runtime.
 """
 
 from .audit import Auditor, JsonlAuditor
-from .evaluators import build_deepseek_evaluator, build_evaluator, build_haiku_evaluator
+from .evaluators import build_evaluator, build_litellm_evaluator
 from .format_score import format_score
 from .hooks import protocol_prompt, stop
 from .mcp import build_mcp_server, build_tool_handlers
@@ -50,9 +50,8 @@ __all__ = [
     "MOP",
     "build_mcp_server",
     "build_tool_handlers",
-    "build_deepseek_evaluator",
     "build_evaluator",
-    "build_haiku_evaluator",
+    "build_litellm_evaluator",
     "protocol_prompt",
     "stop",
     "Auditor",
