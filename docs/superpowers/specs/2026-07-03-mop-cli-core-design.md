@@ -97,6 +97,8 @@ Console-script entry point `mop`, added to `pyproject.toml`
 mop check [TEXT] [--file PATH] [--rules-dir PATH] [--rules-file PATH]
           [--rule NAME] [--model MODEL] [--justify REASON] [--json]
 mop rules [--rules-dir PATH] [--rules-file PATH] [--json]
+mop rules list [--json]        # explicit form of the bare default
+mop rules show NAME [--json]   # detailed view of one rule
 ```
 
 `mop rules` prints the resolved active rule set — post-discovery,
