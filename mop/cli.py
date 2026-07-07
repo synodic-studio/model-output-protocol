@@ -33,12 +33,15 @@ EXIT_REJECTED = 2
 EXIT_ERROR = 3
 
 
+_DETERMINISTIC = ("regex", "script", "length")
+
+
 def _deterministic_hits(text: str, rules: list[Rule]) -> list[str]:
-    """Names of active regex/script rules that fire on `text` (authoritative)."""
+    """Names of active deterministic rules that fire on `text` (authoritative)."""
     return [
         r.name
         for r in rules
-        if r.detector in ("regex", "script") and _rule_matches(r, text)
+        if r.detector in _DETERMINISTIC and _rule_matches(r, text)
     ]
 
 

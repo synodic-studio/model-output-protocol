@@ -47,7 +47,7 @@ def register_builtin_lint(name: str, guidance: str, check: BuiltinLint) -> None:
 @dataclass(frozen=True)
 class Rule:
     name: str
-    detector: str           # "llm" | "regex" | "script"
+    detector: str           # "llm" | "regex" | "script" | "length"
     parameters: dict
     guidance: str
     source_file: str
@@ -181,13 +181,34 @@ def _run_script(rule: Rule, text: str) -> bool:
 def _rule_matches(rule: Rule, text: str) -> bool:
     """Check whether a rule's deterministic detector fires on `text`.
 
-    Handles `regex` (declarative patterns) and `script` (subprocess or
-    registered check). Returns False for `llm` rules.
+    Handles `regex` (declarative patterns), `script` (subprocess or
+    registered check), and `length` (character/word caps). Returns False
+    for `llm` rules.
     """
     if rule.detector == "regex":
         return any(re.search(pat, text) for pat in rule.parameters.get("patterns", []))
     if rule.detector == "script":
         return _run_script(rule, text)
+    if rule.detector == "length":
+        return _exceeds_length(rule.parameters, text)
+    return False
+
+
+def _exceeds_length(params: dict, text: str) -> bool:
+    """A `length` rule fires when a configured char/word cap is exceeded.
+
+    `parameters` may carry `max_chars` and/or `max_words`; the rule fires
+    if any present cap is exceeded. This is the configurable-per-interface
+    "prevent huge messages" primitive (set a tight cap for chat, a loose
+    one for a web UI) — declarative, so no external script and fast enough
+    to run against the whole eval corpus.
+    """
+    max_chars = params.get("max_chars")
+    if max_chars is not None and len(text) > max_chars:
+        return True
+    max_words = params.get("max_words")
+    if max_words is not None and len(text.split()) > max_words:
+        return True
     return False
 
 

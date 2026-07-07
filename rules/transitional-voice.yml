@@ -1,13 +1,13 @@
 rules:
 - name: length-cap-chat
   active: false
-  detector: script
+  detector: length
   description: Chat messages over ~200 words should be moved to a document
   parameters:
-    # A `script` detector runs an external command: the message is piped on
-    # stdin, exit 0 = pass, non-zero = the rule fires. You supply the script
-    # in your repo's .mop/ (word counting is beyond what regex can express).
-    command: .mop/scripts/word-cap.sh 200
+    # `length` fires when a configured cap is exceeded. Use max_words and/or
+    # max_chars; a deployment tunes the number per interface (tight for chat,
+    # loose for a web UI) via its own .mop/ — see docs/adr/0001.
+    max_words: 200
   rationale: 'Current models trained with verbose-output rewards. Chat is for short
 
     interactions; longer content overwhelms mobile readers and is better

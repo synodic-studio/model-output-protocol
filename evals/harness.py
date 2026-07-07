@@ -42,6 +42,9 @@ RULES_DIR = Path(os.environ.get("MOP_RULES_DIR", REPO_ROOT / "rules"))
 CORPUS_DIR = Path(os.environ.get("MOP_EVALS_CORPUS", Path(__file__).resolve().parent / "counterexamples"))
 
 
+DETERMINISTIC_DETECTORS = ("regex", "script", "length")
+
+
 @dataclass
 class Rule:
     name: str
@@ -52,7 +55,7 @@ class Rule:
 
     @property
     def is_deterministic(self) -> bool:
-        return self.detector == "deterministic"
+        return self.detector in DETERMINISTIC_DETECTORS
 
 
 @dataclass
@@ -106,23 +109,24 @@ def load_counterexamples(corpus_dir: Path) -> list[Counterexample]:
 
 
 def evaluate_deterministic(rule: Rule, text: str) -> bool:
-    """Return True if the rule fires on the text."""
-    params = rule.parameters
-    detector_type = params.get("type")
+    """Return True if the rule fires on the text.
 
-    if detector_type == "regex":
-        for pattern in params.get("patterns", []):
-            if re.search(pattern, text):
-                return True
-        return False
+    Delegates to the real ``mop.rules._rule_matches`` so the harness and the
+    shipped gate can never drift on detector semantics again (regex / script /
+    length are all defined in one place).
+    """
+    from mop.rules import Rule as MopRule
+    from mop.rules import _rule_matches
 
-    if detector_type == "word_count":
-        max_words = params.get("max", 0)
-        return len(text.split()) > max_words
-
-    raise ValueError(
-        f"Unknown deterministic detector type {detector_type!r} on rule "
-        f"{rule.name!r} (from {rule.source_file})"
+    return _rule_matches(
+        MopRule(
+            name=rule.name,
+            detector=rule.detector,
+            parameters=rule.parameters,
+            guidance="",
+            source_file=rule.source_file,
+        ),
+        text,
     )
 
 
@@ -141,7 +145,13 @@ def run_llm_eval(
     # Import the real MOP rules loader to get LLM rules with guidance
     from mop.evaluators import build_evaluator
     from mop.rules import load_rules as mop_load_rules
-    from mop.types import Accepted, Rejected
+    from mop.types import Rejected, Rewritten
+
+    def _unresolved(verdict) -> list[str]:
+        """Rule names a derived verdict left unresolved (Rejected or partial Rewritten)."""
+        if isinstance(verdict, (Rejected, Rewritten)):
+            return list(verdict.unresolved)
+        return []
 
     real_rules = mop_load_rules(RULES_DIR)
     llm_rules = [r for r in real_rules if r.detector == "llm"]
@@ -186,25 +196,24 @@ def run_llm_eval(
                 )
                 continue
 
-            llm_violated = isinstance(verdict, Rejected) and (
-                rr.name in verdict.violations
-            )
+            unresolved = _unresolved(verdict)
+            llm_violated = rr.name in unresolved
 
             if llm_violated and should_violate:
                 correct += 1
-            elif isinstance(verdict, Accepted) and should_be_clean:
+            elif not unresolved and should_be_clean:
                 correct += 1
-            elif isinstance(verdict, Rejected) and should_be_clean:
+            elif unresolved and should_be_clean:
                 mismatches.append(
                     {
                         "type": "false_alarm",
                         "rule": rr.name,
                         "example": example.id,
                         "file": example.file_path,
-                        "llm_violations": verdict.violations,
+                        "llm_violations": unresolved,
                     }
                 )
-            elif isinstance(verdict, Accepted) and should_violate:
+            elif not unresolved and should_violate:
                 mismatches.append(
                     {
                         "type": "missed",
@@ -213,18 +222,14 @@ def run_llm_eval(
                         "file": example.file_path,
                     }
                 )
-            elif (
-                isinstance(verdict, Rejected)
-                and should_violate
-                and rr.name not in verdict.violations
-            ):
+            elif unresolved and should_violate and not llm_violated:
                 mismatches.append(
                     {
                         "type": "wrong_violation",
                         "rule": rr.name,
                         "example": example.id,
                         "file": example.file_path,
-                        "llm_violations": verdict.violations,
+                        "llm_violations": unresolved,
                     }
                 )
 

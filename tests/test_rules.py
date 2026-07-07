@@ -453,6 +453,37 @@ def test_script_detector_fires_on_nonzero_exit(tmp_path: Path):
     assert _rule_matches(rule, "this is fine") is False
 
 
+def test_length_detector_max_words(tmp_path: Path):
+    from mop.rules import _rule_matches
+
+    rule = Rule("cap", "length", {"max_words": 3}, "shorten", "r.yml")
+    assert _rule_matches(rule, "one two three") is False        # == cap, ok
+    assert _rule_matches(rule, "one two three four") is True     # over cap
+
+
+def test_length_detector_max_chars(tmp_path: Path):
+    from mop.rules import _rule_matches
+
+    rule = Rule("cap", "length", {"max_chars": 5}, "shorten", "r.yml")
+    assert _rule_matches(rule, "hello") is False
+    assert _rule_matches(rule, "hello!") is True
+
+
+def test_length_detector_either_cap_fires(tmp_path: Path):
+    from mop.rules import _rule_matches
+
+    rule = Rule("cap", "length", {"max_chars": 100, "max_words": 2}, "", "r.yml")
+    assert _rule_matches(rule, "short enough words here") is True  # word cap
+    assert _rule_matches(rule, "two words") is False
+
+
+def test_length_detector_no_caps_never_fires(tmp_path: Path):
+    from mop.rules import _rule_matches
+
+    rule = Rule("cap", "length", {}, "", "r.yml")
+    assert _rule_matches(rule, "anything at all goes here") is False
+
+
 def test_script_detector_raises_when_command_missing(tmp_path: Path):
     """A command that can't run raises rather than silently passing."""
     import pytest
