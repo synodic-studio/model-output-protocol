@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 import textwrap
 from dataclasses import asdict
@@ -151,6 +152,29 @@ def _render(verdict: Verdict, rules: list[Rule], *, as_json: bool) -> int:
     return code
 
 
+def _maybe_audit(
+    text: str, verdict: Verdict, rules: list[Rule], justification: str | None
+) -> None:
+    """If MOP_AUDIT_LOG is set, append this verdict to the JSONL flight recorder.
+
+    Observability for the stateless CLI: real `mop check` traffic lands in the
+    same daily-rotated `<dir>/YYYY-MM-DD.jsonl` the MCP gate uses, so verdicts
+    can be reviewed for performance and mined into new evals later.
+    """
+    log_dir = os.environ.get("MOP_AUDIT_LOG")
+    if not log_dir:
+        return
+    from .audit import JsonlAuditor
+
+    JsonlAuditor(log_dir).record(
+        original=text,
+        verdict=verdict,
+        rule_names=[r.name for r in rules],
+        attempt=0,
+        justification=justification,
+    )
+
+
 def _run_check(args: argparse.Namespace, rules: list[Rule]) -> int:
     if not rules:
         print("no active rules — MOP enforced nothing", file=sys.stderr)
@@ -169,6 +193,7 @@ def _run_check(args: argparse.Namespace, rules: list[Rule]) -> int:
             allow_rewrite=not args.no_rewrite,
         )
     )
+    _maybe_audit(text, verdict, rules, args.justify)
     return _render(verdict, rules, as_json=args.as_json)
 
 
@@ -193,7 +218,8 @@ def _build_parser() -> argparse.ArgumentParser:
         description=(
             "Evaluate text against local .mop/ rules. Built-ins are OFF by "
             "default — pass --builtins to include the packaged rule set. With "
-            "no rules at all, MOP warns and accepts (enforces nothing)."
+            "no rules at all, MOP warns and accepts (enforces nothing). Set "
+            "MOP_AUDIT_LOG=<dir> to record every verdict as JSONL."
         ),
     )
     check_p.add_argument("text", nargs="?", help="Text to check (or use --file/stdin)")

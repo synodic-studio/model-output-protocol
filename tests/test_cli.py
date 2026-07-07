@@ -192,6 +192,25 @@ def test_empty_input_errors(repo, monkeypatch, capsys):
 # ---------------------------------------------------------------------------
 
 
+def test_audit_log_written_when_env_set(repo, monkeypatch, tmp_path):
+    log_dir = tmp_path / "auditlogs"
+    monkeypatch.setenv("MOP_AUDIT_LOG", str(log_dir))
+    _patch_evaluator(monkeypatch, Accepted())
+    code = main(["check", "hello world", "--json"])
+    assert code == EXIT_ACCEPTED
+    files = list(log_dir.glob("*.jsonl"))
+    assert len(files) == 1
+    entry = json.loads(files[0].read_text().strip())
+    assert entry["verdict"] == "accepted"
+    assert entry["original"] == "hello world"
+
+
+def test_no_audit_log_when_env_unset(repo, monkeypatch, tmp_path):
+    monkeypatch.delenv("MOP_AUDIT_LOG", raising=False)
+    _patch_evaluator(monkeypatch, Accepted())
+    assert main(["check", "hello"]) == EXIT_ACCEPTED  # no crash, no file
+
+
 def test_justify_passes_justification(repo, monkeypatch):
     calls = []
     _patch_evaluator(monkeypatch, Accepted(), calls)

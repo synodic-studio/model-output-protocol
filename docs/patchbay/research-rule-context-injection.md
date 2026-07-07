@@ -33,7 +33,7 @@ two duplicated inline expressions in `build_deepseek_evaluator` and
   (`mop rules` default output).
 
 A meta-note: the one active rule in the corpus,
-`doable-work-permission`, carries a `canonical_example` whose text is
+`no-permission-asking-for-doable-work`, carries a `canonical_example` whose text is
 *about this exact gap* ("a running MOP host bakes the rule list into
 its system prompt at session spawn, so toggles on the site won't reach
 an already-running session until it restarts").
@@ -52,7 +52,7 @@ Measured with tiktoken `cl100k_base` on the actual `rules/` corpus
 
 | Scenario | entries | L0 | L1 | L2 | L3 | L4 |
 |---|---|---|---|---|---|---|
-| Active today (`doable-work-permission` only) | 1 | 7 | 21 | 45 | 141 | 161 |
+| Active today (`no-permission-asking-for-doable-work` only) | 1 | 7 | 21 | 45 | 141 | 161 |
 | Realistic full set (core + behavior + transitional files) | 14 | 122 | 305 | 439 | 535 | 679 |
 | Entire corpus, everything flipped active | 33 | 271 | 691 | 825 | 921 | 1,122 |
 
@@ -152,7 +152,7 @@ rejected before the user sees them — a rejection costs you a
 justification round-trip. Draft each message to comply on the first
 submission; re-read your draft against this list before submitting.
 
-  - doable-work-permission: If you have the tools and context to do
+  - no-permission-asking-for-doable-work: If you have the tools and context to do
     the work, do it and report back. [...]
     Example violation:
       [...canonical_example...]

@@ -1,5 +1,5 @@
 rules:
-- name: doable-work-permission
+- name: no-permission-asking-for-doable-work
   detector: llm
   description: Don't ask permission for work the agent has the tools to do
   parameters:
@@ -76,3 +76,40 @@ rules:
     "can you run X and paste it" is friction the agent could have erased by
     doing X. Deliberately fragile-but-important: the hard part is telling a
     genuinely user-only task from one the agent is dodging.
+
+- name: no-flag-when-fix-is-obvious
+  detector: llm
+  description: If the agent identifies a fixable defect (typo, stale info), it must fix it, not flag or ask
+  parameters:
+    prompt: |
+      Does this message IDENTIFY a concrete, in-scope defect the agent could
+      fix itself — a typo, a stale or outdated reference, a broken link, an
+      obvious small error — and then merely FLAG it or ASK about it, instead
+      of having already fixed it?
+
+      Key on the agent's OWN framing: if the message calls something a typo /
+      stale / outdated / obviously wrong and does not fix it, it fires. Do
+      NOT try to judge whether the thing really is a typo — only whether the
+      agent surfaced a fixable defect without fixing it.
+
+      Examples of violations:
+        - "I noticed the README still references the old build command. Worth updating that."
+        - "There's a typo in this function name — should I fix it?"
+        - "That doc looks stale, want me to refresh it?"
+
+      NOT a violation:
+        - The agent reports a defect it ALREADY fixed ("Fixed a typo in X.").
+        - The fix is genuinely out of scope, risky, or ambiguous, AND the
+          message says why it is being surfaced rather than fixed.
+        - Acting requires a decision or approval that is the user's to make.
+  guidance: |
+    If you identify a typo, stale reference, or obvious fixable defect and you
+    have the tools, fix it and report that you did. Only surface-without-fixing
+    when the fix is genuinely out of scope, risky, or the user's call — and
+    then say why.
+  rationale: |
+    Proactive fixing is the default: identifying a defect and handing it back
+    ("worth updating that") is the same delegation failure as asking
+    permission. Keyed on the agent's own labeling so the rule stays simple —
+    it enforces "if you called it a typo, you must have fixed it," not "is
+    this a typo." Stale info and typos must never be asked about — always fix.

@@ -15,7 +15,7 @@ text: |
 
   One caveat I didn't fix: a running MOP host bakes the rule list into its system prompt at session spawn, so toggles on the site won't reach an already-running session until it restarts. That's the real transport gap you were pointing at — separate fix, want me to take it next?
 expected_violations:
-- doable-work-permission
+- no-permission-asking-for-doable-work
 rationale: |
   Bryan called this out directly: "your previous message is perfect example
   for a rule that enforces doing doable work."

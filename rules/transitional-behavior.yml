@@ -5,28 +5,15 @@
 # are EXPECTED to deprecate as models improve.
 #
 # All rules are restored with `active: false` after a prior simplification
-# pass deleted them outright. The `doable-work-permission` rule covers the
-# same ground as the older `no-permission-asking-for-doable-work` and lives
-# in `behavior.yml` as the lone active rule today.
+# pass deleted them outright. The `no-permission-asking-for-doable-work` rule
+# (in `behavior.yml`) covers permission-asking; its siblings there,
+# `no-delegating-doable-work` and `no-flag-when-fix-is-obvious`, cover
+# delegating work back and flagging-instead-of-fixing.
 
 rules:
 
-  - name: no-flag-when-fix-is-obvious
-    active: false
-    detector: llm
-    description: Don't flag problems you can fix yourself
-    parameters:
-      prompt: |
-        Does this message identify a problem ("X is broken", "Y is
-        missing") and stop, when the agent has the context and tools to
-        fix it within the scope of the current task?
-    guidance: |
-      If the fix is obvious and within scope, do it. If it's out of scope
-      or genuinely ambiguous, say WHY you're flagging instead of fixing.
-    rationale: |
-      Current models are trained toward conservative report-don't-act
-      behavior. Flagging problems the agent could fix transfers work to
-      the user.
+  # no-flag-when-fix-is-obvious lives in behavior.yml (fuller version keyed on
+  # the agent's own "typo"/"stale" labeling); it was previously duplicated here.
 
   - name: no-stop-mid-task-for-confirmation
     active: false

@@ -13,13 +13,13 @@ match rejects on its own; the LLM judges only `llm` rules. See
 ## Schema
 
 A rule file contains a top-level `rules:` list. Each entry uses one of the
-three detector shapes below.
+four detector shapes below.
 
 ### LLM Rule
 
 ```yaml
 rules:
-  - name: doable-work-permission
+  - name: no-permission-asking-for-doable-work
     detector: llm
     description: Don't ask permission for work the agent has the tools to do
     parameters:
