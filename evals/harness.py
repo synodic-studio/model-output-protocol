@@ -145,7 +145,7 @@ def run_llm_eval(
     # Import the real MOP rules loader to get LLM rules with guidance
     from mop.evaluators import build_evaluator
     from mop.rules import load_rules as mop_load_rules
-    from mop.types import Rejected, Rewritten
+    from mop.types import Accepted, Rejected, Rewritten
 
     def _unresolved(verdict) -> list[str]:
         """Rule names a derived verdict left unresolved (Rejected or partial Rewritten)."""
@@ -153,37 +153,41 @@ def run_llm_eval(
             return list(verdict.unresolved)
         return []
 
-    real_rules = mop_load_rules(RULES_DIR)
-    llm_rules = [r for r in real_rules if r.detector == "llm"]
+    # include_inactive so a freshly-drafted rule (shipped active: false) can be
+    # evaluated; restrict to the caller's (possibly --rule-filtered) set.
+    wanted = {r.name for r in rules}
+    real_rules = mop_load_rules(RULES_DIR, include_inactive=True)
+    llm_rules = [
+        r for r in real_rules if r.detector == "llm" and r.name in wanted
+    ]
 
     if not llm_rules:
         print("No LLM rules found.")
         return [], 0
 
-    # Build the evaluator using the real LLM rules
-    evaluator = build_evaluator(rules=llm_rules)
+    # One evaluator per rule, so a rewrite/rejection is attributable to THAT
+    # rule (the evaluator only knows about it). Under the best-effort-rewrite
+    # model a rule "fired" when the message was not accepted as-is — a *clean
+    # rewrite* means the rule fired and the evaluator fixed it, which the old
+    # "rule name in unresolved" check wrongly scored as a miss.
+    evaluators = {r.name: build_evaluator(rules=[r]) for r in llm_rules}
 
     mismatches: list[dict] = []
     correct = 0
 
     print(f"\n--- LLM Eval ({len(llm_rules)} rules, {len(examples)} examples) ---")
 
+    import asyncio
+
     for example in examples:
         for rr in llm_rules:
-            # Only evaluate this rule if the example mentions it
             should_violate = rr.name in example.expected_violations
             should_be_clean = rr.name in example.expected_clean
-
             if not should_violate and not should_be_clean:
                 continue  # example doesn't annotate this rule
 
-            # Run LLM evaluator — only the hint for this specific rule
-            import asyncio
-
             try:
-                verdict = asyncio.run(
-                    evaluator(example.text, [rr.name] if should_violate else [], None)
-                )
+                verdict = asyncio.run(evaluators[rr.name](example.text, [], None))
             except Exception as exc:
                 mismatches.append(
                     {
@@ -196,40 +200,29 @@ def run_llm_eval(
                 )
                 continue
 
-            unresolved = _unresolved(verdict)
-            llm_violated = rr.name in unresolved
+            fired = not isinstance(verdict, Accepted)  # rewrote or rejected
 
-            if llm_violated and should_violate:
+            if fired and should_violate:
                 correct += 1
-            elif not unresolved and should_be_clean:
+            elif not fired and should_be_clean:
                 correct += 1
-            elif unresolved and should_be_clean:
+            elif fired and should_be_clean:
                 mismatches.append(
                     {
                         "type": "false_alarm",
                         "rule": rr.name,
                         "example": example.id,
                         "file": example.file_path,
-                        "llm_violations": unresolved,
+                        "llm_violations": _unresolved(verdict) or ["<rewrote>"],
                     }
                 )
-            elif not unresolved and should_violate:
+            elif not fired and should_violate:
                 mismatches.append(
                     {
                         "type": "missed",
                         "rule": rr.name,
                         "example": example.id,
                         "file": example.file_path,
-                    }
-                )
-            elif unresolved and should_violate and not llm_violated:
-                mismatches.append(
-                    {
-                        "type": "wrong_violation",
-                        "rule": rr.name,
-                        "example": example.id,
-                        "file": example.file_path,
-                        "llm_violations": unresolved,
                     }
                 )
 
