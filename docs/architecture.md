@@ -92,23 +92,22 @@ This keeps MOP transport-agnostic and LLM-agnostic. MOP provides two adapter sur
 
 The reference evaluator is **`build_litellm_evaluator`** (`mop/evaluators.py`), a litellm-backed, provider-agnostic implementation. Model selection precedence:
 
-  `--model` arg  > `MOP_EVALUATOR_MODEL` env var (litellm `` "provider/model" `` string)  > legacy `MOP_EVALUATOR=deepseek|haiku` alias (kept for existing hosts)  > default `deepseek/deepseek-chat`
+  `--model` arg (a `small`/`medium`/`large` tier or a raw `provider/model`)  > `MOP_EVALUATOR_MODEL` env var  > legacy `MOP_EVALUATOR=deepseek|haiku` alias  > default tier `small` = `deepseek/deepseek-v4-flash`. Tiers resolve through MOP's own `MODEL_ALIASES`.
 
 The host supplies its own `deliver` (Telegram, Slack, web socket, …).
 
-Lints feed hints to the evaluator; rules produce the verdict. See [`CONTEXT.md`](../CONTEXT.md) for the term definitions.
+Deterministic detectors (`regex`/`script`/`length`) are **authoritative** — a match rejects on its own; the one LLM call judges only `llm` rules. See [`CONTEXT.md`](../CONTEXT.md) and [`adr/`](adr/).
 
 ---
 
 ## Wire schema
 
-`mop.types.EvalLLMResponse` is a pydantic model that LLM adapters pass to their structured-output layer (e.g. pydantic-ai's `output_type=`). `mop.types.verdict_from_eval_response()` converts the structured response back to a `Verdict`. Keeping the schema inside MOP means every adapter speaks the same wire format — no schema drift across hosts.
+`mop.types.EvalLLMResponse` is a pydantic model that LLM adapters pass to their structured-output layer. `mop.types.verdict_from_eval_response()` **derives** a `Verdict` from it — the model no longer declares an `action`; the label is computed from *(did the text change? is `unresolved` empty?)*, so it can never disagree with the data.
 
 ```python
 class EvalLLMResponse(BaseModel):
-    action: Literal["accept", "rewrite", "reject"]
-    rewritten: str | None = None
-    violations: list[str] = []
+    rewritten: str | None = None   # best-effort corrected text; null = no change
+    unresolved: list[str] = []     # rule names the model could not fix
 ```
 
 ---
@@ -122,44 +121,31 @@ class EvalLLMResponse(BaseModel):
 **Intended resolution (in priority order):**
 
 1. **Audit-only in channel mode** — stream through without blocking, log violations. Enforcement only in non-channel turns.
-2. **Streaming deterministic eval** — regex/word-count rules can fire mid-stream; LLM rules remain post-hoc.
-3. **Post-hoc correction push** — emit a Haiku-rewritten correction as a follow-up message after a violating stream completes. Weird UX; opt-in only.
+2. **Streaming deterministic eval** — regex/length rules can fire mid-stream; LLM rules remain post-hoc.
+3. **Post-hoc correction push** — emit an evaluator-rewritten correction as a follow-up message after a violating stream completes. Weird UX; opt-in only.
 
 ---
 
-## Rule / Lint format
+## Rule format
 
-### LLM Rule
+Every entry is a rule with one of four detectors. Full schema and examples
+in [`rules/README.md`](../rules/README.md) and
+[`adr/0001`](adr/0001-detector-taxonomy-and-composition.md).
 
 ```yaml
 name: rule-id
-detector: llm
+detector: llm            # or: regex | script | length
 parameters:
-  prompt: "Does this message...?"
+  prompt: "Does this message...?"   # llm
+  # patterns: [...]                 # regex
+  # command: .mop/scripts/check.sh  # script (stdin in, exit code = verdict)
+  # max_words: 200 / max_chars: 3000  # length
 guidance: "..."                      # shown to the agent on rejection
-rationale: "..."                     # human-facing
+rationale: "..."                     # human-facing, never sent to the model
 ```
 
-### Lint (deterministic check)
-
-```yaml
-name: lint-id
-lint: true
-detector: deterministic
-parameters:
-  type: regex
-  patterns: [...]
-guidance: "..."                      # feeds into evaluator prompt as advisory context
-rationale: "..."                     # human-facing
-```
-
-Supported lint types:
-| Type | Extra fields |
-| --- | --- |
-| `regex` | `patterns` — Python-flavor regex list |
-| `word_count` | `max` — integer word ceiling |
-
-Lints live in the same flat `rules/` directory as rules. To stage a draft rule without enforcing it, keep `active: false` or keep the file outside `rules/`.
+`regex`/`script`/`length` are deterministic and authoritative. Rules live in
+a flat `rules/` directory; `active: false` stages a draft without enforcing it.
 
 ---
 
