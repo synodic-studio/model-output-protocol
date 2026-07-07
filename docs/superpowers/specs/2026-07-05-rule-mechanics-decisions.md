@@ -1,23 +1,42 @@
-# MOP rule mechanics — decisions & status (2026-07-05)
+# MOP rule mechanics — decisions & status (2026-07-05, simplified 2026-07-06)
 
-Status: **design decisions, not yet implemented.** Captures a grilling
-session that refined the composition model from
-`docs/patchbay/research-composition-model.md` and settled the evaluation
-flow. Supersedes nothing that shipped; extends the CLI/core work in
-`2026-07-03-mop-cli-core-design.md`. This doc is the durable record —
-when implementation starts, fold it into a proper spec.
+Status: **design settled, ready to build.** Captures a grilling session that
+refined the composition model from `docs/patchbay/research-composition-model.md`
+and settled the evaluation flow. A second pass on 2026-07-06 deliberately
+*cut scope* to ship sooner (see "Scope cut" below). Extends the CLI/core work
+in `2026-07-03-mop-cli-core-design.md`. This is the durable decisions record;
+the build-ready task breakdown lives in `2026-07-06-rule-mechanics-impl-spec.md`.
 
 ## Where the shipped code stands (baseline)
 
 The `2026-07-03` CLI work is complete and on `develop`: `mop check` /
-`mop rules`, litellm evaluator, packaged builtins, `.mop/` discovery
-(stops at the *first* `.mop/` walking up), hardcoded two-layer
-`[builtin, local]` merge. Detectors today: `detector: llm |
-deterministic | regex` with a second `parameters.type` level. Deterministic
-matches are **advisory hints** to the LLM, not authoritative.
+`mop rules`, litellm evaluator, packaged builtins, `.mop/` discovery,
+hardcoded two-layer `[builtin, local]` merge. Detectors today:
+`detector: llm | deterministic | regex` with a second `parameters.type`
+level. Deterministic matches are **advisory hints** to the LLM, not
+authoritative.
 
-The decisions below change three of those baselines: detector taxonomy,
-multi-level proximity merge, and deterministic authority.
+The decisions below change three baselines — detector taxonomy (D1),
+deterministic authority (D3), and the verdict shape (D4) — and **flip the
+builtin default from on to opt-in** (D6).
+
+## Scope cut (2026-07-06) — what we are NOT building
+
+To reach a shippable v1, these earlier ideas are **dropped**, not deferred
+with ceremony. Nothing in v1 references them; revisit only if a real need
+appears:
+
+- **`imports:`** — no rule-file reuse-by-reference.
+- **Walk-up stacking / proximity precedence** — no collecting multiple
+  `.mop/` levels, no "nearest wins" ordering.
+- **`rulesets:` central ordering file** — gone.
+- **`.mop/config.yml`** — no config file at all in v1. The only local
+  surface is a `.mop/` folder of rule YAML. The one wholesale switch
+  (builtins on/off) lives in the CLI, not a file (D6).
+
+Result: composition is just **two flat layers** — optional builtins (opt-in)
+under your local `.mop/` rules — which is essentially the already-shipped
+merge, minus the un-built magic.
 
 ## Settled decisions
 
@@ -33,28 +52,21 @@ single detector field:
   JSON/schema validation, markdown/AST structure checks all collapse to
   `script`. No further deterministic kinds are needed.
 
-Possible future sugar (not now): a first-class **`terms`** allow/deny
-wordlist detector (Vale-vocab-style), because it is common and ugly as
-raw regex. Stays a `script` until proven worth promoting.
+**In scope for v1.** Possible future sugar (not now): a first-class
+**`terms`** allow/deny wordlist detector (Vale-vocab-style) — stays a
+`script` until proven worth promoting.
 
-### D2 — Composition: proximity, in-place, import-for-reuse
+### D2 — Composition: two flat layers, no magic
 
-- Rules are **defined in place** in YAML and auto-discovered. No central
-  registration step.
+- Rules are **defined in place** in `.mop/*.yml` and auto-discovered. No
+  central registration step, no imports, no tree walking.
 - One knob per rule: **`is_active`, default true.**
-- **Precedence = proximity.** MOP walks up from the invocation directory
-  collecting each `.mop/` it passes; **nearest wins, builtin is the
-  floor.** (top/mid/bot invoked in bot → bot > mid > top > builtin.)
-- **Overrides are just rules.** To silence or replace a shipped/inherited
-  rule, drop a **same-name** entry in a closer `.mop/` — `active: false`
-  to silence, or new content to replace. No separate override config
-  (this is the SwiftLint "config overrides shipped defaults" behavior,
-  expressed as ordinary rule files).
-- **`@import` is a reuse primitive only.** An `imports:` list in a rule
-  file references a shared rule file (e.g. `~/.mop/house.yml`) so it need
-  not be copied. Orthogonal to precedence — NOT the ordering backbone.
-- **No mandatory central ordering file.** A `rulesets:` list survives
-  only as a rare escape hatch for when proximity isn't the order wanted.
+- **Layering is fixed and flat:** optional builtins (base) → local `.mop/`
+  rules (on top). Local overrides a same-name builtin. That's the whole
+  precedence story.
+- **Overrides are just rules.** To silence or replace a builtin, drop a
+  **same-name** entry in `.mop/` — `active: false` to silence, or new
+  content to replace.
 
 ### D3 — Deterministic rules are authoritative
 
@@ -71,11 +83,16 @@ LLM. The single LLM call judges only the `llm`-type rules.
   violations together.
 - **Verdict shape: best-effort rewrite + a list of unresolved
   violations** — "here's what I could fix, the rest is up to you." This
-  collapses accept/rewrite/reject into one graceful shape:
-  - empty residual, text unchanged → **accept**
-  - empty residual, text changed → **clean rewrite**
-  - non-empty residual, text changed → **partial** (fixed what it could)
-  - non-empty residual, text unchanged → **reject** (couldn't fix anything)
+  collapses accept/rewrite/reject into one graceful shape, and **is also
+  our severity model** (S1 below — no separate `severity` field):
+  - empty `unresolved`, text unchanged → **accept**
+  - empty `unresolved`, text changed → **clean rewrite**
+  - non-empty `unresolved`, text changed → **partial** (fixed what it could)
+  - non-empty `unresolved`, text unchanged → **reject** (couldn't fix anything)
+- **Field naming (was Q4):** the still-broken list is named **`unresolved`**.
+  The **`verdict` label is derived**, not stored — computed from
+  (text-changed?, `unresolved`-empty?) so the label can never disagree
+  with the data. It is still printed for caller convenience.
 - The evaluator (cheap small model, already called) does the rewrite —
   bouncing a bare rule back would force the expensive frontier model to
   redo work. **Judgement always runs; only the rewrite *output* is
@@ -89,10 +106,33 @@ litellm, so MOP must populate its own alias map). Default `small` =
 **DeepSeek V4 Flash via deepseek**. Confirm the exact litellm model id at
 build time.
 
+### D6 — Builtins are opt-in; empty means warn, not silent
+
+MOP imposes nothing by default and refuses to pretend it acted when it
+has nothing to enforce.
+
+- **Builtins off by default.** `mop check` runs **only** local `.mop/`
+  rules. `mop check --builtins` loads the packaged rules as a base under
+  the local rules.
+- **Empty case → warn + accept (exit 0).** No `--builtins` *and* no local
+  rules found = nothing to enforce: print `no active rules — MOP enforced
+  nothing` to stderr and let the message through (there was genuinely
+  nothing to reject). It does **not** hard-fail a fresh/empty repo. A
+  future `--require-rules` flag can make empty fatal if a caller wants it.
+- **Discoverable in `--help`:** both `--builtins` and the empty-warning
+  behavior are documented there.
+
+### S1 — Severity: intentionally none
+
+No `severity: warning | error` field. The response *type* already encodes
+it: `accept` = nothing flagged, `rewrite` = fixable, `reject` = can't fix.
+An accept is **silent** (no "FYI" notes channel in v1) — if something is
+worth saying, it's worth rewriting; if not, don't nag.
+
 ## Worked example (validates against the current `mop/rules.py` schema)
 
-Builtin ships two rules; a project adds local rules and imports a shared
-file.
+Builtin ships two rules; a project adds local rules and overrides one builtin.
+No imports, no config file.
 
 `mop/rules_builtin/core.yml`
 ```yaml
@@ -115,8 +155,6 @@ rules:
 
 `<repo>/.mop/rules.yml`
 ```yaml
-imports:
-  - ~/.mop/house.yml               # D2: reuse by reference
 rules:
   - name: label-options-for-reference   # new local rule
     detector: llm
@@ -129,51 +167,33 @@ rules:
     active: false
 ```
 
-`~/.mop/house.yml`
-```yaml
-rules:
-  - name: no-em-dash
-    detector: regex
-    parameters: { patterns: ["—"] }
-    guidance: Replace the em dash with a comma, colon, or period.
-```
+Resolved active set inside `<repo>`:
+- `mop check` → `label-options-for-reference` only (builtins not loaded).
+- `mop check --builtins` → `no-leaked-secrets` + `label-options-for-reference`;
+  `no-fabricated-attribution` silenced by the local same-name `active: false`.
 
-Resolved active set inside `<repo>` (builtin → imported → local wins):
-`no-leaked-secrets`, `no-em-dash`, `label-options-for-reference`;
-`no-fabricated-attribution` silenced.
-
-Trace — agent tries to send:
+Trace — `mop check --builtins`, agent tries to send:
 > "Got it, I'll wire it up. Key is SECRET-abc123 — ping me."
 
-1. Deterministic (no LLM): `no-leaked-secrets` matches → reject;
-   `no-em-dash` matches → reject.
+1. Deterministic (no LLM): `no-leaked-secrets` matches → reject.
 2. One LLM call judges `label-options-for-reference` (no options → no
-   fire), told about the two deterministic hits so its rewrite fixes them.
-3. Combined verdict:
+   fire), told about the deterministic hit so its rewrite fixes it.
+3. Combined verdict (label derived, `unresolved` empty → clean rewrite):
    ```json
    {"verdict": "rewritten",
     "rewritten": "Got it, I'll wire it up. I've got the API key. Ping me.",
     "unresolved": []}
    ```
-   One LLM call total; deterministic rules rejected on their own; the
-   rewrite repaired both.
 
-## Open questions (not blocking; resolve before/at implementation)
+## Open questions
 
-- **Q1 — import precedence.** When a file both `imports:` a set and
-  defines a same-named rule, which wins? Lean: the importing file's own
-  rule wins over its imports (imports sit "below" the file's own entries).
-- **Q2 — walk-up depth.** Collect *all* `.mop/` levels cwd→repo-root
-  (implied by the top/mid/bot example), or only the nearest? Lean: all
-  levels, stacked by proximity. Confirm.
-- **Q3 — `terms` detector.** First-class, or stays a `script`? Lean:
-  stays a `script` until a real need appears.
-- **Q4 — verdict field naming.** `unresolved` vs `violations` vs
-  `residual` for the still-broken list; and whether `verdict` stays an
-  enum or is derived from (text-changed?, residual-empty?).
+**None design-level.** S1, Q1 (imports) and Q2 (walk-up) are resolved by the
+scope cut; Q3 (`terms`) is future sugar; Q4 is resolved in D4. Remaining
+uncertainty is empirical — whether the model *works* in practice — which
+only a build answers. Confirm the exact DeepSeek litellm id at build time (D5).
 
 ## Next step
 
-Either finish Q1–Q4 in another short grilling pass, or promote this doc
-to a full implementation spec (`2026-07-05-...` → tasks) and build.
-Nothing here is committed to code yet.
+Build. Task breakdown in `2026-07-06-rule-mechanics-impl-spec.md`:
+D1 detector flatten → D3 authoritative → D4 verdict shape → D5 alias →
+D6 `--builtins` + empty-warn.
