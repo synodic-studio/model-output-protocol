@@ -40,19 +40,59 @@ def _patch_evaluator(monkeypatch, verdict, calls=None):
 
 
 @pytest.mark.asyncio
-async def test_check_passes_lint_hints_and_justification():
+async def test_check_passes_deterministic_hits_and_justification():
+    """The deterministic violations + justification are forwarded to the LLM call."""
     calls = []
-    lint_rule = Rule(
+    det_rule = Rule(
         "too-long", "regex", {"patterns": [r"\bwords\b"]},
-        "keep it short", "x.yml", lint=True,
+        "keep it short", "x.yml",
     )
     v = await check(
-        "three words here", [lint_rule], _fake_evaluator(Accepted(), calls),
+        "three words here", [det_rule], _fake_evaluator(Accepted(), calls),
         justification="because",
     )
-    assert isinstance(v, Accepted)
+    # The evaluator was told about the deterministic hit...
     assert calls[0]["hints"] == ["too-long"]
     assert calls[0]["justification"] == "because"
+    # ...and because its (fake) Accepted did not clear the still-matching
+    # regex, deterministic authority (D3) forces a Rejected on the residual.
+    assert isinstance(v, Rejected)
+    assert v.unresolved == ["too-long"]
+
+
+@pytest.mark.asyncio
+async def test_check_rewrite_that_clears_deterministic_is_accepted_clean():
+    """A rewrite that removes the matching pattern yields a clean Rewritten."""
+    calls = []
+    det_rule = Rule(
+        "no-bang", "regex", {"patterns": [r"!"]}, "no exclamation", "x.yml",
+    )
+    v = await check(
+        "hi!", [det_rule], _fake_evaluator(Rewritten(rewritten="hi"), calls),
+    )
+    assert isinstance(v, Rewritten)
+    assert v.rewritten == "hi"
+    assert v.unresolved == []
+
+
+@pytest.mark.asyncio
+async def test_check_no_rules_is_accepted_without_calling_evaluator():
+    calls = []
+    v = await check("anything", [], _fake_evaluator(Accepted(), calls))
+    assert isinstance(v, Accepted)
+    assert calls == []  # no llm rules, no deterministic hits → no LLM call
+
+
+@pytest.mark.asyncio
+async def test_check_no_rewrite_flag_skips_rewrite():
+    """--no-rewrite path: deterministic residual is reported, never rewritten."""
+    det_rule = Rule("no-bang", "regex", {"patterns": [r"!"]}, "no bang", "x.yml")
+    v = await check(
+        "hi!", [det_rule], _fake_evaluator(Rewritten(rewritten="hi")),
+        allow_rewrite=False,
+    )
+    assert isinstance(v, Rejected)
+    assert v.unresolved == ["no-bang"]
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +105,7 @@ def test_accepted_exit_and_json(repo, monkeypatch, capsys):
     code = main(["check", "hello world", "--json"])
     assert code == EXIT_ACCEPTED
     payload = json.loads(capsys.readouterr().out)
-    assert payload == {"verdict": "accepted", "rewritten": None, "violations": []}
+    assert payload == {"verdict": "accepted", "rewritten": None, "unresolved": []}
 
 
 def test_rewritten_exit_and_json(repo, monkeypatch, capsys):
@@ -90,15 +130,15 @@ def test_rejected_json_resolves_guidance(repo, monkeypatch, capsys):
             }
         )
     )
-    _patch_evaluator(monkeypatch, Rejected(violations=["no-hype"]))
+    _patch_evaluator(monkeypatch, Rejected(unresolved=["no-hype"]))
     code = main(["check", "AMAZING!!!", "--json"])
     assert code == EXIT_REJECTED
     payload = json.loads(capsys.readouterr().out)
-    assert payload["violations"] == [{"name": "no-hype", "guidance": "No hype words."}]
+    assert payload["unresolved"] == [{"name": "no-hype", "guidance": "No hype words."}]
 
 
 def test_rejected_human_output_shows_guidance(repo, monkeypatch, capsys):
-    _patch_evaluator(monkeypatch, Rejected(violations=["unspecified"]))
+    _patch_evaluator(monkeypatch, Rejected(unresolved=["unspecified"]))
     code = main(["check", "text"])
     assert code == EXIT_REJECTED
     out = capsys.readouterr().out

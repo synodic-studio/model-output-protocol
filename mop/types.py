@@ -3,8 +3,8 @@
 Verdict — what `submit_message` / `submit_justification` return:
   - Accepted              : LLM said ok; deliver() was called with the original text
   - AcceptedFailedOpen    : justification budget exhausted; original delivered with a system note
-  - Rewritten             : LLM rewrote; deliver() was called with the rewritten text
-  - Rejected              : LLM rejected; original is now `pending_message`, agent must justify
+  - Rewritten             : evaluator rewrote; deliver() got the rewritten text (may carry `unresolved`)
+  - Rejected              : nothing fixable; original is now `pending_message`, agent must justify `unresolved`
 
 Gate — what the Stop hook returns:
   - Allow                 : agent may end the turn
@@ -21,8 +21,8 @@ definition for all future adapters.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Awaitable, Callable, Literal, Union
+from dataclasses import dataclass, field
+from typing import Awaitable, Callable, Union
 
 from pydantic import BaseModel
 
@@ -47,22 +47,36 @@ class AcceptedFailedOpen:
 
 @dataclass(frozen=True)
 class Rewritten:
-    """LLM rewrote the message; deliver() was called with the rewritten text."""
+    """Evaluator produced a rewrite; deliver() was called with the rewritten text.
+
+    ``unresolved`` lists any rule names the rewrite could NOT clear (the
+    "partial" case — best-effort fix applied, the rest is up to the agent).
+    Empty for a clean rewrite.
+    """
 
     rewritten: str
+    unresolved: list[str] = field(default_factory=list)
 
     def serialize(self) -> dict:
-        return {"verdict": "rewritten", "rewritten": self.rewritten}
+        return {
+            "verdict": "rewritten",
+            "rewritten": self.rewritten,
+            "unresolved": list(self.unresolved),
+        }
 
 
 @dataclass(frozen=True)
 class Rejected:
-    """LLM rejected the message; agent must call submit_justification."""
+    """Nothing could be fixed; agent must call submit_justification.
 
-    violations: list[str]
+    ``unresolved`` lists the rule names still violated (Q4: the residual
+    "you deal with these" set).
+    """
+
+    unresolved: list[str]
 
     def serialize(self) -> dict:
-        return {"verdict": "rejected", "violations": list(self.violations)}
+        return {"verdict": "rejected", "unresolved": list(self.unresolved)}
 
 
 Verdict = Union[Accepted, AcceptedFailedOpen, Rewritten, Rejected]
@@ -96,27 +110,36 @@ class NoPendingMessageError(Exception):
 # `verdict_from_eval_response()`.
 
 class EvalLLMResponse(BaseModel):
-    """Structured output schema every LLM evaluator must produce."""
+    """Structured output schema every LLM evaluator must produce.
 
-    action: Literal["accept", "rewrite", "reject"]
-    rewritten: str | None = None       # required when action == "rewrite"
-    violations: list[str] = []         # rule names; required when action == "reject"
+    No `action` field — the disposition is DERIVED (see
+    `verdict_from_eval_response`), so the label can never disagree with the
+    data. The model returns only its best-effort rewrite plus the rule
+    names it could not fix.
+    """
+
+    rewritten: str | None = None       # best-effort corrected text; null = no change
+    unresolved: list[str] = []         # rule names the model could not fix
 
 
 def verdict_from_eval_response(
     response: "EvalLLMResponse", *, original_text: str
 ) -> "Verdict":
-    """Map an EvalLLMResponse to a runtime Verdict.
+    """Derive a runtime Verdict from (did-text-change?, is-unresolved-empty?).
 
-    `original_text` is needed when action="rewrite" but `rewritten` came
-    back empty — we fall back to the original rather than delivering an
-    empty string.
+    - unchanged + empty      → Accepted
+    - changed + empty        → Rewritten (clean)
+    - changed + non-empty    → Rewritten (partial; carries unresolved)
+    - unchanged + non-empty  → Rejected
     """
-    if response.action == "accept":
-        return Accepted()
-    if response.action == "rewrite":
-        return Rewritten(rewritten=response.rewritten or original_text)
-    return Rejected(violations=response.violations or ["unspecified"])
+    rewritten = response.rewritten
+    changed = rewritten is not None and rewritten.strip() != original_text.strip()
+    unresolved = list(response.unresolved)
+    if not unresolved:
+        return Rewritten(rewritten=rewritten, unresolved=[]) if changed else Accepted()
+    if changed:
+        return Rewritten(rewritten=rewritten, unresolved=unresolved)
+    return Rejected(unresolved=unresolved)
 
 
 # ─── Closure type aliases ─────────────────────────────────────────────

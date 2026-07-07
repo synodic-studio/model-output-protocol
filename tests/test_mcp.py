@@ -18,7 +18,7 @@ def deliveries():
 def mop_instance(deliveries):
     async def evaluator(text, regex_hints, justification):
         if "bad" in text:
-            return Rejected(violations=["no-bad-words"])
+            return Rejected(unresolved=["no-bad-words"])
         return Accepted()
 
     async def deliver(text, system_note=None):
@@ -40,12 +40,12 @@ async def test_submit_message_handler_returns_mcp_content(mop_instance, deliveri
 
 
 @pytest.mark.asyncio
-async def test_submit_message_rejected_serializes_violations(mop_instance):
+async def test_submit_message_rejected_serializes_unresolved(mop_instance):
     handlers = build_tool_handlers(mop_instance)
     result = await handlers["submit_message"]({"message": "bad input"})
     payload = json.loads(result["content"][0]["text"])
     assert payload["verdict"] == "rejected"
-    assert payload["violations"] == ["no-bad-words"]
+    assert payload["unresolved"] == ["no-bad-words"]
 
 
 @pytest.mark.asyncio

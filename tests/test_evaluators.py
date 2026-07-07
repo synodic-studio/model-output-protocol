@@ -54,13 +54,14 @@ async def test_returns_rewritten_with_payload():
 
 
 @pytest.mark.asyncio
-async def test_returns_rejected_with_violations():
-    p1, p2 = _patched({"action": "reject", "violations": ["rule-x"]})
+async def test_returns_rejected_with_unresolved():
+    # No rewrite + non-empty unresolved → derived Rejected.
+    p1, p2 = _patched({"rewritten": None, "unresolved": ["rule-x"]})
     with p1, p2:
         evaluator = build_litellm_evaluator(rules=[])
         v = await evaluator("bad", [], None)
     assert isinstance(v, Rejected)
-    assert v.violations == ["rule-x"]
+    assert v.unresolved == ["rule-x"]
 
 
 @pytest.mark.asyncio

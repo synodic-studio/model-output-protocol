@@ -24,7 +24,7 @@ from pathlib import Path
 
 from .discovery import resolve_rules
 from .evaluators import build_evaluator
-from .rules import Rule, collect_lint_hints
+from .rules import Rule, _rule_matches
 from .types import Accepted, Evaluator, Rejected, Rewritten, Verdict
 
 EXIT_ACCEPTED = 0
@@ -33,21 +33,70 @@ EXIT_REJECTED = 2
 EXIT_ERROR = 3
 
 
+def _deterministic_hits(text: str, rules: list[Rule]) -> list[str]:
+    """Names of active regex/script rules that fire on `text` (authoritative)."""
+    return [
+        r.name
+        for r in rules
+        if r.detector in ("regex", "script") and _rule_matches(r, text)
+    ]
+
+
+def _llm_unresolved(verdict: Verdict) -> list[str]:
+    """The rule names an evaluator verdict left unresolved."""
+    if isinstance(verdict, (Rejected, Rewritten)):
+        return list(verdict.unresolved)
+    return []
+
+
 async def check(
     text: str,
     rules: list[Rule],
     evaluator: Evaluator,
     *,
     justification: str | None = None,
+    allow_rewrite: bool = True,
 ) -> Verdict:
-    """Pure one-shot check: lint hints + one evaluator call, raw Verdict out.
+    """One-shot check: deterministic rules are authoritative, then one LLM call.
 
-    ``rules`` must be the same resolved set the evaluator was built with —
-    evaluators bake rules into their prompt; this parameter feeds lint-hint
-    collection (and, in the CLI renderer, guidance lookup).
+    Two phases (D3/D4):
+      1. Run every active ``regex``/``script`` rule. A match is a hard
+         violation the LLM cannot wave away.
+      2. One LLM call judges the ``llm`` rules and produces a best-effort
+         rewrite that also removes the deterministic violations. The
+         deterministic rules are re-checked against the rewrite, so a fix
+         only counts if it actually cleared the pattern.
+
+    The final verdict is DERIVED from (did-text-change?, is-unresolved-empty?).
+    ``allow_rewrite=False`` (CLI ``--no-rewrite``) runs judgement but never
+    applies a rewrite — verdict-only for CI/lint callers.
     """
-    hints = collect_lint_hints(text, rules)
-    return await evaluator(text, hints, justification)
+    det_pre = _deterministic_hits(text, rules)
+    has_llm = any(r.detector == "llm" for r in rules)
+    if not det_pre and not has_llm:
+        return Accepted()
+
+    if not allow_rewrite:
+        llm_unresolved = _llm_unresolved(
+            await evaluator(text, det_pre, justification)
+        ) if has_llm else []
+        unresolved = _dedupe(det_pre + llm_unresolved)
+        return Rejected(unresolved) if unresolved else Accepted()
+
+    verdict = await evaluator(text, det_pre, justification)
+    final_text = verdict.rewritten if isinstance(verdict, Rewritten) else text
+    unresolved = _dedupe(_deterministic_hits(final_text, rules) + _llm_unresolved(verdict))
+    changed = final_text.strip() != text.strip()
+    if not unresolved:
+        return Rewritten(final_text, unresolved=[]) if changed else Accepted()
+    if changed:
+        return Rewritten(final_text, unresolved=unresolved)
+    return Rejected(unresolved)
+
+
+def _dedupe(names: list[str]) -> list[str]:
+    """Order-preserving dedupe."""
+    return list(dict.fromkeys(names))
 
 
 def _read_input(args: argparse.Namespace) -> str:
@@ -65,30 +114,34 @@ def _read_input(args: argparse.Namespace) -> str:
     return text
 
 
-def _violations_payload(names: list[str], rules: list[Rule]) -> list[dict]:
+def _unresolved_payload(names: list[str], rules: list[Rule]) -> list[dict]:
     guidance_by_name = {r.name: r.guidance for r in rules}
     return [{"name": n, "guidance": guidance_by_name.get(n, "")} for n in names]
 
 
 def _render(verdict: Verdict, rules: list[Rule], *, as_json: bool) -> int:
     if isinstance(verdict, Rewritten):
+        unresolved = _unresolved_payload(verdict.unresolved, rules)
         payload = {
             "verdict": "rewritten",
             "rewritten": verdict.rewritten,
-            "violations": [],
+            "unresolved": unresolved,
         }
         human = f"rewritten\n\n{verdict.rewritten}"
+        if unresolved:
+            lines = "\n".join(f"  {v['name']}: {v['guidance']}" for v in unresolved)
+            human += f"\n\nunresolved (fix these yourself):\n{lines}"
         code = EXIT_REWRITTEN
     elif isinstance(verdict, Rejected):
-        violations = _violations_payload(verdict.violations, rules)
-        payload = {"verdict": "rejected", "rewritten": None, "violations": violations}
-        lines = "\n".join(f"  {v['name']}: {v['guidance']}" for v in violations)
+        unresolved = _unresolved_payload(verdict.unresolved, rules)
+        payload = {"verdict": "rejected", "rewritten": None, "unresolved": unresolved}
+        lines = "\n".join(f"  {v['name']}: {v['guidance']}" for v in unresolved)
         human = f"rejected\n{lines}"
         code = EXIT_REJECTED
     else:
         # Accepted. (AcceptedFailedOpen is unreachable in one-shot mode —
         # it only arises from the MCP adapter's justification budget.)
-        payload = {"verdict": "accepted", "rewritten": None, "violations": []}
+        payload = {"verdict": "accepted", "rewritten": None, "unresolved": []}
         human = "accepted"
         code = EXIT_ACCEPTED
     print(json.dumps(payload) if as_json else human)
@@ -103,7 +156,13 @@ def _run_check(args: argparse.Namespace, rules: list[Rule]) -> int:
     text = _read_input(args)
     evaluator = build_evaluator(rules=rules, model=args.model)
     verdict = asyncio.run(
-        check(text, rules, evaluator, justification=args.justify)
+        check(
+            text,
+            rules,
+            evaluator,
+            justification=args.justify,
+            allow_rewrite=not args.no_rewrite,
+        )
     )
     return _render(verdict, rules, as_json=args.as_json)
 
@@ -131,6 +190,11 @@ def _build_parser() -> argparse.ArgumentParser:
     check_p.add_argument("--rule", help="Restrict evaluation to one named rule")
     check_p.add_argument("--model", help="litellm model string (default: MOP_EVALUATOR_MODEL)")
     check_p.add_argument("--justify", metavar="REASON", help="Attach a justification")
+    check_p.add_argument(
+        "--no-rewrite",
+        action="store_true",
+        help="Judge only; never apply a rewrite (verdict-only, for CI/lint)",
+    )
     check_p.add_argument("--json", action="store_true", dest="as_json")
 
     rules_p = sub.add_parser("rules", help="List or show rules.")

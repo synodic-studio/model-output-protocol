@@ -34,7 +34,7 @@ def accept_evaluator():
 @pytest.fixture
 def reject_evaluator():
     async def _eval(text, regex_hints, justification):
-        return Rejected(violations=["test-rule"])
+        return Rejected(unresolved=["test-rule"])
     return _eval
 
 
@@ -72,7 +72,7 @@ async def test_rejected_does_not_deliver_and_sets_pending(
     mop = MOP(rules=[], evaluator=reject_evaluator, deliver=deliver)
     v = await mop.submit_message("bad text")
     assert isinstance(v, Rejected)
-    assert v.violations == ["test-rule"]
+    assert v.unresolved == ["test-rule"]
     assert deliveries == []
     assert mop.pending_message == "bad text"
     assert mop.sent_message_this_turn is False
@@ -126,7 +126,7 @@ async def test_justification_can_flip_rejected_to_accepted(
     async def evaluator(text, regex_hints, justification):
         calls["n"] += 1
         if justification is None:
-            return Rejected(violations=["test-rule"])
+            return Rejected(unresolved=["test-rule"])
         return Accepted()
 
     mop = MOP(rules=[], evaluator=evaluator, deliver=deliver)
@@ -148,7 +148,7 @@ async def test_justification_loop_failed_open_after_cap(
     """4 rejected justifications, 5th attempt failed-opens."""
 
     async def always_reject(text, regex_hints, justification):
-        return Rejected(violations=["stubborn-rule"])
+        return Rejected(unresolved=["stubborn-rule"])
 
     mop = MOP(
         rules=[],
@@ -188,7 +188,7 @@ async def test_replacing_pending_with_new_submit_message(
     async def evaluator(text, regex_hints, justification):
         if rejections["first"]:
             rejections["first"] = False
-            return Rejected(violations=["r"])
+            return Rejected(unresolved=["r"])
         return Accepted()
 
     mop = MOP(rules=[], evaluator=evaluator, deliver=deliver)

@@ -49,7 +49,7 @@ def test_jsonl_auditor_appends_multiple_records(tmp_path: Path) -> None:
     )
     auditor.record(
         original="three",
-        verdict=Rejected(violations=("bad-thing",)),
+        verdict=Rejected(unresolved=("bad-thing",)),
         rule_names=["r1"],
         attempt=0,
     )
@@ -62,7 +62,7 @@ def test_jsonl_auditor_appends_multiple_records(tmp_path: Path) -> None:
     assert parsed[1]["verdict"] == "rewritten"
     assert parsed[1]["rewritten"] == "two (cleaned)"
     assert parsed[2]["verdict"] == "rejected"
-    assert parsed[2]["violations"] == ["bad-thing"]
+    assert parsed[2]["unresolved"] == ["bad-thing"]
 
 
 def test_jsonl_auditor_includes_justification_when_present(tmp_path: Path) -> None:
@@ -159,7 +159,7 @@ async def test_mop_audits_rewritten_with_attempt_zero() -> None:
 @pytest.mark.asyncio
 async def test_mop_audits_rejected_then_justification_round_trip() -> None:
     rec = _Recorder()
-    verdicts = iter([Rejected(violations=("bad",)), Accepted()])
+    verdicts = iter([Rejected(unresolved=("bad",)), Accepted()])
 
     async def evaluator(text, hints, just):
         return next(verdicts)
@@ -185,7 +185,7 @@ async def test_mop_audits_failed_open_after_budget_exhausted() -> None:
     rec = _Recorder()
 
     async def evaluator(text, hints, just):
-        return Rejected(violations=("bad",))
+        return Rejected(unresolved=("bad",))
 
     async def deliver(text, note):
         return None

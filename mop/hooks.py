@@ -35,7 +35,7 @@ def protocol_prompt(rules: list[Rule]) -> str:
         "  - accepted              — your message was delivered as-is.",
         "  - rewritten             — your message was rewritten and the rewrite was "
         "delivered. Use the rewrite as your reference for what the user saw.",
-        "  - rejected(violations)  — your message was NOT delivered. Call "
+        "  - rejected(unresolved)  — your message was NOT delivered. Call "
         "`submit_justification(reason)` to argue your case (up to 4 attempts; "
         "after that MOP failed-opens and delivers your original with a warning to the user).",
         "  - acceptedFailedOpen    — failed-open path: your original was delivered, "

@@ -30,9 +30,9 @@ def test_rewritten_carries_rewritten_text():
     assert v.rewritten == "cleaned up version"
 
 
-def test_rejected_carries_violations():
-    v = Rejected(violations=["rule-a", "rule-b"])
-    assert v.violations == ["rule-a", "rule-b"]
+def test_rejected_carries_unresolved():
+    v = Rejected(unresolved=["rule-a", "rule-b"])
+    assert v.unresolved == ["rule-a", "rule-b"]
 
 
 # ---------------------------------------------------------------------------
@@ -51,12 +51,25 @@ def test_accepted_failed_open_serialize():
 
 def test_rewritten_serialize():
     v = Rewritten(rewritten="cleaned")
-    assert v.serialize() == {"verdict": "rewritten", "rewritten": "cleaned"}
+    assert v.serialize() == {
+        "verdict": "rewritten",
+        "rewritten": "cleaned",
+        "unresolved": [],
+    }
+
+
+def test_rewritten_serialize_carries_unresolved():
+    v = Rewritten(rewritten="cleaned", unresolved=["still-bad"])
+    assert v.serialize() == {
+        "verdict": "rewritten",
+        "rewritten": "cleaned",
+        "unresolved": ["still-bad"],
+    }
 
 
 def test_rejected_serialize():
-    v = Rejected(violations=["rule-a", "rule-b"])
-    assert v.serialize() == {"verdict": "rejected", "violations": ["rule-a", "rule-b"]}
+    v = Rejected(unresolved=["rule-a", "rule-b"])
+    assert v.serialize() == {"verdict": "rejected", "unresolved": ["rule-a", "rule-b"]}
 
 
 def test_gate_allow_and_block():
@@ -71,52 +84,60 @@ def test_no_pending_message_error_is_exception():
     assert isinstance(err, Exception)
 
 
-def test_eval_llm_response_validates_action_literal():
+def test_eval_llm_response_defaults():
+    """No `action` field; rewritten optional, unresolved defaults to []."""
     from mop.types import EvalLLMResponse
-    import pydantic
 
-    EvalLLMResponse(action="accept")
-    EvalLLMResponse(action="rewrite", rewritten="...")
-    EvalLLMResponse(action="reject", violations=["x"])
-    with pytest.raises(pydantic.ValidationError):
-        EvalLLMResponse(action="totally-invalid")
+    r = EvalLLMResponse()
+    assert r.rewritten is None
+    assert r.unresolved == []
+    r2 = EvalLLMResponse(rewritten="fixed", unresolved=["x"])
+    assert r2.rewritten == "fixed"
+    assert r2.unresolved == ["x"]
 
 
-def test_verdict_from_eval_response_accept():
+def test_verdict_derives_accept_when_unchanged_and_clean():
     from mop.types import EvalLLMResponse, verdict_from_eval_response
 
-    v = verdict_from_eval_response(EvalLLMResponse(action="accept"), original_text="hi")
+    v = verdict_from_eval_response(EvalLLMResponse(), original_text="hi")
     assert isinstance(v, Accepted)
+    # rewritten == original also derives Accepted (no real change).
+    v2 = verdict_from_eval_response(
+        EvalLLMResponse(rewritten="hi"), original_text="hi"
+    )
+    assert isinstance(v2, Accepted)
 
 
-def test_verdict_from_eval_response_rewrite_uses_rewritten():
+def test_verdict_derives_clean_rewrite():
     from mop.types import EvalLLMResponse, verdict_from_eval_response
 
     v = verdict_from_eval_response(
-        EvalLLMResponse(action="rewrite", rewritten="cleaned"),
+        EvalLLMResponse(rewritten="cleaned"), original_text="messy"
+    )
+    assert isinstance(v, Rewritten)
+    assert v.rewritten == "cleaned"
+    assert v.unresolved == []
+
+
+def test_verdict_derives_partial_rewrite():
+    """Changed text + non-empty unresolved → Rewritten carrying the residual."""
+    from mop.types import EvalLLMResponse, verdict_from_eval_response
+
+    v = verdict_from_eval_response(
+        EvalLLMResponse(rewritten="cleaned", unresolved=["rule-b"]),
         original_text="messy",
     )
     assert isinstance(v, Rewritten)
     assert v.rewritten == "cleaned"
+    assert v.unresolved == ["rule-b"]
 
 
-def test_verdict_from_eval_response_rewrite_falls_back_to_original_if_empty():
+def test_verdict_derives_reject_when_unchanged_and_unresolved():
     from mop.types import EvalLLMResponse, verdict_from_eval_response
 
     v = verdict_from_eval_response(
-        EvalLLMResponse(action="rewrite", rewritten=None),
-        original_text="messy",
-    )
-    assert isinstance(v, Rewritten)
-    assert v.rewritten == "messy"
-
-
-def test_verdict_from_eval_response_reject_carries_violations():
-    from mop.types import EvalLLMResponse, verdict_from_eval_response
-
-    v = verdict_from_eval_response(
-        EvalLLMResponse(action="reject", violations=["rule-a"]),
+        EvalLLMResponse(rewritten=None, unresolved=["rule-a"]),
         original_text="bad",
     )
     assert isinstance(v, Rejected)
-    assert v.violations == ["rule-a"]
+    assert v.unresolved == ["rule-a"]

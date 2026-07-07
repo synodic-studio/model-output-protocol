@@ -72,38 +72,42 @@ def _api_key_for(model: str) -> str | None:
 
 
 def _build_query(
-    rules: list[Rule], text: str, regex_hints: list[str], justification: str | None
+    rules: list[Rule],
+    text: str,
+    deterministic_violations: list[str],
+    justification: str | None,
 ) -> str:
     rule_lines = "\n".join(
         f"  - {r.name}: {(r.guidance or '').strip()}" for r in rules
     ) or "  (no active rules)"
-    hint_line = (
-        f"Regex prelim hits (advisory, not authoritative): {', '.join(regex_hints)}"
-        if regex_hints
-        else "Regex prelim: clean."
+    det_line = (
+        "These deterministic rules are CONFIRMED violated and MUST be removed "
+        f"in your rewrite: {', '.join(deterministic_violations)}"
+        if deterministic_violations
+        else "No deterministic violations detected."
     )
     just_line = (
         f"\nThe agent has provided this justification for the message:\n"
         f"  {justification}\n"
-        "Decide whether the justification clears the rule violation."
+        "Weigh whether the justification clears the fixable rules."
         if justification
         else ""
     )
     return (
         "You are a message gate. Active rules:\n"
         f"{rule_lines}\n\n"
-        f"{hint_line}\n\n"
+        f"{det_line}\n\n"
         "Message under review:\n"
         f"<message>\n{text}\n</message>\n"
         f"{just_line}\n\n"
-        "Decide one of three actions:\n"
-        "  - accept: message passes all rules, deliver as-is\n"
-        "  - rewrite: message violates style but is fixable; provide the corrected text in 'rewritten'\n"
-        "  - reject: message violates substantive rules; list the violated rule names in 'violations'\n\n"
+        "Produce your BEST-EFFORT rewrite that fixes every violation you can "
+        "(including the confirmed deterministic ones), preserving the message's "
+        "intent. List the names of any rules you could NOT fix in 'unresolved'. "
+        "If the message already passes every rule, set 'rewritten' to null and "
+        "'unresolved' to [].\n\n"
         "Respond ONLY with a JSON object of the shape:\n"
-        '  {"action": "accept" | "rewrite" | "reject",\n'
-        '   "rewritten": string or null,\n'
-        '   "violations": [string, ...]}\n'
+        '  {"rewritten": string or null,\n'
+        '   "unresolved": [string, ...]}\n'
     )
 
 
@@ -129,11 +133,11 @@ def build_litellm_evaluator(
     api_key = _api_key_for(model_id)
 
     async def evaluate(
-        text: str, regex_hints: list[str], justification: str | None
+        text: str, deterministic_violations: list[str], justification: str | None
     ) -> Verdict:
         import litellm
 
-        query = _build_query(rules, text, regex_hints, justification)
+        query = _build_query(rules, text, deterministic_violations, justification)
         kwargs: dict = {}
         if api_key:
             kwargs["api_key"] = api_key
