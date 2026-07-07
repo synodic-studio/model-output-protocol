@@ -166,26 +166,34 @@ def build_litellm_evaluator(
             schema_ok = litellm.supports_response_schema(model=model_id)
         except Exception:
             schema_ok = False
-        kwargs["response_format"] = (
-            EvalLLMResponse if schema_ok else {"type": "json_object"}
-        )
         messages = [{"role": "user", "content": query}]
-        try:
-            response = await litellm.acompletion(
-                model=model_id, messages=messages, **kwargs
-            )
-        except Exception as exc:
-            # Some providers/models reject a response_format they don't
-            # support (e.g. DeepSeek: "This response_format type is
-            # unavailable now"). The prompt already asks for raw JSON and we
-            # parse it defensively below, so drop the hint and retry once
-            # rather than failing the whole gate.
-            if "response_format" not in str(exc).lower():
-                raise
-            kwargs.pop("response_format", None)
-            response = await litellm.acompletion(
-                model=model_id, messages=messages, **kwargs
-            )
+        # Graduated structured-output ladder: strongest form first, step down
+        # ONLY when a provider rejects the format itself (never on a real
+        # error). Whatever comes back is validated by pydantic below, so
+        # json_object is a genuine guarantee, not a rounded corner. This is
+        # necessary because some providers advertise schema support they don't
+        # honor — e.g. DeepSeek v4-flash: supports_response_schema is True, but
+        # the json_schema form 400s ("response_format type unavailable"), while
+        # json_object works.
+        formats: list = []
+        if schema_ok:
+            formats.append(EvalLLMResponse)      # json_schema — schema-enforced
+        formats.append({"type": "json_object"})  # JSON mode — widely supported
+        formats.append(None)                     # last resort — prompt-only JSON
+        response = None
+        for response_format in formats:
+            call_kwargs = dict(kwargs)
+            if response_format is not None:
+                call_kwargs["response_format"] = response_format
+            try:
+                response = await litellm.acompletion(
+                    model=model_id, messages=messages, **call_kwargs
+                )
+                break
+            except Exception as exc:
+                is_last = response_format is None
+                if is_last or "response_format" not in str(exc).lower():
+                    raise
         content = response.choices[0].message.content or ""
         try:
             parsed = EvalLLMResponse.model_validate_json(_strip_fences(content))

@@ -90,6 +90,34 @@ async def test_retries_without_response_format_when_provider_rejects_it():
 
 
 @pytest.mark.asyncio
+async def test_steps_down_from_json_schema_to_json_object():
+    """When json_schema is rejected but json_object works (DeepSeek v4-flash),
+    the ladder lands on json_object — NOT the prompt-only last resort."""
+    from mop.types import EvalLLMResponse
+
+    good = _fake_completion({"rewritten": None, "unresolved": []})
+    seen = []
+
+    async def acompletion(*args, **kwargs):
+        rf = kwargs.get("response_format")
+        seen.append(rf)
+        if rf is EvalLLMResponse:  # json_schema form rejected by the provider
+            raise RuntimeError(
+                "DeepseekException - This response_format type is unavailable now"
+            )
+        return await good(*args, **kwargs)
+
+    with patch("litellm.acompletion", acompletion), patch(
+        "litellm.supports_response_schema", return_value=True
+    ):
+        evaluator = build_litellm_evaluator(rules=[], model="deepseek/deepseek-v4-flash")
+        v = await evaluator("hello", [], None)
+    assert isinstance(v, Accepted)
+    # Tried json_schema (pydantic) then json_object — stopped there, no None.
+    assert seen == [EvalLLMResponse, {"type": "json_object"}]
+
+
+@pytest.mark.asyncio
 async def test_non_response_format_error_is_not_retried():
     """An unrelated error (e.g. auth) propagates without a silent retry."""
     calls = []
