@@ -27,7 +27,7 @@ Counterpart on the input side: **HOP** (`human-output-protocol`).
 |---|---|
 | `Accepted` | `deliver(text)` called with the original message; `pending_message` cleared; `sent_message_this_turn = True`. |
 | `Rewritten(rewritten)` | `deliver(rewritten)` called; agent sees the rewritten text in the tool result so future references resolve. |
-| `Rejected(violations)` | `pending_message = source`; agent must call `submit_justification`. No delivery. |
+| `Rejected(unresolved)` | `pending_message = source`; agent must call `submit_justification`. No delivery. |
 | `AcceptedFailedOpen(system_note)` | After `max_justification_attempts = 4`, MOP delivers the original plus a `system_note` bubble. Burns the budget. This is an **escape hatch** — it is never produced by the LLM evaluator, only by MOP itself. |
 
 The verdict *is* the disposition — there's no separate severity or `on_violation` field.
