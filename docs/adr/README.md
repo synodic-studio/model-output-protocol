@@ -14,3 +14,4 @@ short canonical "what we decided and why" that outlives any one spec.
 | [0002](0002-deterministic-authority-and-verdict-shape.md) | Deterministic authority & best-effort-rewrite verdict | Accepted |
 | [0003](0003-evaluator-model-tiers-and-structured-output.md) | Evaluator model tiers & structured-output handling | Accepted |
 | [0004](0004-local-ondevice-evaluator-findings.md) | Local / on-device evaluator findings | Informational |
+| [0005](0005-integration-shapes-and-streaming.md) | Integration shapes & the streaming constraint | Accepted |

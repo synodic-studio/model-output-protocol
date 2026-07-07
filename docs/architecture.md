@@ -2,6 +2,8 @@
 
 > Decisions and their rationale are recorded as ADRs in [`adr/`](adr/). The
 > longer design/grilling narratives live in [`superpowers/specs/`](superpowers/specs/).
+> For wiring MOP into a specific host (Hermes, patchbay-relay, Pi, Claude Code),
+> see [`integration.md`](integration.md) and [`adr/0005`](adr/0005-integration-shapes-and-streaming.md).
 
 ## System position
 
@@ -159,7 +161,7 @@ a flat `rules/` directory; `active: false` stages a draft without enforcing it.
 - [x] `mop.hooks.stop()` Stop-hook callable
 - [x] In-process MCP server builder
 - [x] EvalLLMResponse wire schema + verdict_from_eval_response
-- [x] Live verified end-to-end via [patchbay-relay](https://github.com/synodic-studio/patchbay-relay) (Telegram text + photo + document paths)
+- [x] Verified end-to-end via [patchbay-relay](https://github.com/synodic-studio/patchbay-relay) (Telegram text + photo + document paths) — *historical: that host later removed its MOP harness and went pi-only; not a live integration today. See [integration.md](integration.md).*
 - [x] CLI adapter (`mop check` / `mop rules`, `.mop/` discovery, packaged built-ins)
 - [ ] Channels compatibility (audit-only mode)
 - [ ] CC plugin form of Stop hook (for non-SDK harnesses)
