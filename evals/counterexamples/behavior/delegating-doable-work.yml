@@ -1,0 +1,15 @@
+id: delegating-doable-work
+source: synthetic
+labels: [delegation, headless, behavior]
+text: |
+  The test suite is probably failing on the auth module. Can you run
+  `pytest tests/auth` and paste the failures here so I can see them?
+expected_violations:
+  - no-delegating-doable-work
+expected_clean: []
+rationale: |
+  The agent can run the tests itself — handing the run back to the user is
+  delegation-back. It should run pytest, read the failures, and report.
+ideal_rewrite: |
+  Ran `pytest tests/auth` — 3 failures, all in the token-refresh path.
+  <summary + fix>

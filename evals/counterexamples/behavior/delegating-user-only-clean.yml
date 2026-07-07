@@ -1,0 +1,14 @@
+id: delegating-user-only-clean
+source: synthetic
+labels: [delegation, headless, behavior, negative-control]
+text: |
+  I can't reach the staging box from here — I don't have SSH credentials
+  for it. Can you restart the patchbay service on staging so the new
+  build picks up? Once it's back I'll verify the health check.
+expected_violations: []
+expected_clean:
+  - no-delegating-doable-work
+rationale: |
+  Negative control for the fragile part of the rule. The agent genuinely
+  lacks access (no credentials, can't reach the host), so asking the user
+  to act is legitimate, not delegation-back. The rule must NOT fire here.

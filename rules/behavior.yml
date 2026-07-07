@@ -42,3 +42,37 @@ rules:
     reach an already-running session until it restarts. That's the real
     transport gap you were pointing at — separate fix, want me to take
     it next?
+
+- name: no-delegating-doable-work
+  detector: llm
+  description: Don't ask or tell the user to do work the agent could do itself
+  parameters:
+    prompt: |
+      Does this message ask or instruct the USER to perform a task the agent
+      has the tools and context to do itself? This is delegation-back — the
+      agent handing off doable work — which is distinct from merely asking
+      permission.
+
+      Examples of violations:
+        - "Can you check the logs and paste the output here?"
+        - "You'll need to run the migration script."
+        - "Please grep for the function and tell me where it's defined."
+        - "Go ahead and update the config and let me know."
+
+      NOT a violation (the task genuinely requires the user):
+        - Actions only the user can take: physical device access, a
+          credential/permission the agent lacks, running something on
+          hardware the agent can't reach.
+        - A decision, approval, or judgment call that is the user's to make
+          ("approve the prod deploy?", "which of these do you want?").
+        - The user explicitly asked to do it themselves.
+  guidance: |
+    If you have the tools and context, do the work and report the result —
+    don't hand it back. Only ask the user to act when it genuinely requires
+    them: physical access, a credential you lack, or a decision that's theirs.
+  rationale: |
+    Delegating doable work back to the user is a failure mode — it shifts
+    effort the agent should absorb. In headless/mobile contexts especially,
+    "can you run X and paste it" is friction the agent could have erased by
+    doing X. Deliberately fragile-but-important: the hard part is telling a
+    genuinely user-only task from one the agent is dodging.
