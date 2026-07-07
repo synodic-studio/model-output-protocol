@@ -7,12 +7,10 @@ rules:
 
   - name: no-em-dashes
     description: Never use em dashes in prose
-    detector: deterministic
+    detector: regex
     parameters:
-      type: regex
       patterns:
         - "—"
-    severity: violation
     rationale: |
       Personal style preference. Em dashes feel AI-generated to this user.
 
@@ -23,12 +21,10 @@ rules:
       prompt: |
         Does this message use short clipped fragments and "X is not Y. It's Z."
         patterns that read like a startup-pitch TV script?
-    severity: warn
 
   - name: prefer-letters-not-bullets-in-lists
     description: Use letters (a, b, c) for unordered list items the user might cite back
     detector: llm
-    severity: warn
     rationale: |
       User cites items back by letter ("do b") in voice/chat reply. Plain
       bullets can't be cited shorthand.

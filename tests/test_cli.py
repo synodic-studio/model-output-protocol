@@ -43,7 +43,7 @@ def _patch_evaluator(monkeypatch, verdict, calls=None):
 async def test_check_passes_lint_hints_and_justification():
     calls = []
     lint_rule = Rule(
-        "too-long", "deterministic", {"type": "word_count", "max": 2},
+        "too-long", "regex", {"patterns": [r"\bwords\b"]},
         "keep it short", "x.yml", lint=True,
     )
     v = await check(

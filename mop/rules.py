@@ -16,11 +16,18 @@ context, not as an enforcing gate.
 from __future__ import annotations
 
 import re
+import shlex
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
 import yaml
+
+# Default wall-clock ceiling for a `script` detector's subprocess. A check
+# that hangs must not wedge the gate; overshooting counts as a failure to
+# run, which surfaces as an error rather than a silent pass.
+SCRIPT_TIMEOUT_SECONDS = 5.0
 
 
 # Built-in lint: any registered check is automatically added to loaded rules
@@ -40,11 +47,11 @@ def register_builtin_lint(name: str, guidance: str, check: BuiltinLint) -> None:
 @dataclass(frozen=True)
 class Rule:
     name: str
-    detector: str           # "llm" | "deterministic" | "regex" (legacy)
+    detector: str           # "llm" | "regex" | "script"
     parameters: dict
     guidance: str
     source_file: str
-    lint: bool = False      # True for deterministic pattern checks (advisory)
+    lint: bool = False      # True for MOP's bundled deterministic checks
     active: bool = True     # False only reachable via include_inactive=True
 
 
@@ -101,8 +108,8 @@ def load_rules(rules_dir: Path, *, include_inactive: bool = False) -> list[Rule]
         rules.append(
             Rule(
                 name=name,
-                detector="deterministic",
-                parameters={"type": "builtin_lint"},
+                detector="script",
+                parameters={},
                 guidance=guidance,
                 source_file="<builtin>",
                 lint=True,
@@ -136,34 +143,60 @@ def merge_rules(base: list[Rule], overlay: list[Rule]) -> list[Rule]:
     return [r for r in merged.values() if r.active]
 
 
+def _run_script(rule: Rule, text: str) -> bool:
+    """Run a `script` detector against `text`, return True if it fires.
+
+    Two dispatch cases:
+      - ``parameters.command`` present → run it as a subprocess, pipe
+        `text` on stdin. Exit 0 = pass (no violation); non-zero = the
+        rule fires. Same trust model as a git pre-commit hook: it runs
+        code the user placed in their own repo's ``.mop/``.
+      - otherwise → resolve an in-process check registered via
+        ``register_builtin_lint`` by the rule's name (MOP's bundled
+        deterministic checks keep this fast path — no process spawn).
+
+    A command that cannot be run (missing, timeout, crash) raises rather
+    than silently passing — a broken deterministic check must be loud.
+    """
+    command = rule.parameters.get("command")
+    if command is None:
+        entry = _BUILTIN_LINTS.get(rule.name)
+        return entry[1](text) if entry is not None else False
+    argv = shlex.split(command) if isinstance(command, str) else list(command)
+    try:
+        completed = subprocess.run(
+            argv,
+            input=text,
+            capture_output=True,
+            text=True,
+            timeout=SCRIPT_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(
+            f"script rule {rule.name!r} failed to run {command!r}: {exc}"
+        ) from exc
+    return completed.returncode != 0
+
+
 def _rule_matches(rule: Rule, text: str) -> bool:
     """Check whether a rule's deterministic detector fires on `text`.
 
-    Supports regex, word_count, and builtin_lint types. Returns False
-    for LLM rules.
+    Handles `regex` (declarative patterns) and `script` (subprocess or
+    registered check). Returns False for `llm` rules.
     """
-    if rule.detector == "llm":
-        return False
-    params = rule.parameters
-    dtype = params.get("type")
-    if dtype == "regex":
-        return any(re.search(pat, text) for pat in params.get("patterns", []))
-    if dtype == "word_count":
-        return len(text.split()) > params.get("max", 0)
-    if dtype == "builtin_lint":
-        entry = _BUILTIN_LINTS.get(rule.name)
-        if entry is not None:
-            return entry[1](text)
+    if rule.detector == "regex":
+        return any(re.search(pat, text) for pat in rule.parameters.get("patterns", []))
+    if rule.detector == "script":
+        return _run_script(rule, text)
     return False
 
 
 def collect_regex_hints(text: str, rules: list[Rule]) -> list[str]:
-    """Run all regex/word_count detectors against `text`. Return matching rule names.
+    """Run all deterministic detectors against `text`. Return matching rule names.
 
-    Only checks rules whose detector is NOT "llm" — in practice this means
-    legacy deterministic rules (without `lint: true`). New code should
-    use `collect_lint_hints` instead, which only checks entries with
-    `lint: True`.
+    Only checks rules whose detector is NOT "llm" — i.e. `regex` and
+    `script` rules. New code should use `collect_lint_hints` instead,
+    which only checks entries with `lint: True`.
 
     These are advisory hints fed to the LLM eval as context. They are NOT
     authoritative — the LLM may still accept text that matches a regex,

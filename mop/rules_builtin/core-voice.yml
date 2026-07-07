@@ -6,10 +6,9 @@ rules:
 
   - name: no-completed-without-findings-pings
     active: false
-    detector: deterministic
+    detector: regex
     description: Status pings that announce completion with no actionable signal
     parameters:
-      type: regex
       patterns:
         - "(?i)completed (with|without) (no |any )?(findings|issues|errors)"
         - "(?i)scan complete\\."

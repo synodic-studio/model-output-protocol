@@ -14,14 +14,36 @@ referenced below are real: `mop/rules.py` (`Rule`, `load_rules`,
 
 ## Design note settled at spec time: what `script` means (D1)
 
-`script` detectors are **Python checks registered in-process by name**,
-exactly like today's `register_builtin_lint(name, guidance, check)` — YAML
-references them by rule name, it does **not** carry inline code. Rationale:
-executing arbitrary code strings pulled from a `.mop/*.yml` file is a code
--injection surface we will not ship in v1. If user-authored scripts are
-ever wanted, that's a separate, sandboxed feature. So `regex` is fully
-declarative-in-YAML; `script` is "reference a registered check." This is
-a small narrowing of D1, not a new decision.
+`script` detectors are **external commands** referenced by path. A rule
+carries `parameters.command`; MOP runs it as a subprocess, pipes the
+message under review to the command's **stdin**, and reads the result from
+its **exit code** (0 = pass, non-zero = violation), with stdout available
+as optional guidance detail. This is how *users* author custom
+deterministic checks — language-agnostic, process-isolated.
+
+Rationale / trust model: this is the same trust surface as a git
+pre-commit hook or a Makefile — it runs code the user put in their own
+repo's `.mop/`. What we are NOT doing is executing inline code *strings*
+embedded in YAML. Caveat to document in `--help`: running `mop check` in a
+repo whose `.mop/` you did not author executes that repo's scripts (same
+as `pre-commit` on an untrusted clone) — don't block on it, just surface it.
+
+MOP's own builtins **keep their existing in-process mechanism**
+(`register_builtin_lint`) — converting them to subprocesses would put a
+process spawn in the hot path and add churn for zero user benefit. So a
+`script` rule dispatches on two cases: `parameters.command` present →
+external subprocess; else → registered in-process check by name. `regex`
+stays fully declarative-in-YAML.
+
+### Scope: which evaluation surface changes (v1)
+
+There are two entry points that feed deterministic matches to the LLM:
+`cli.py` (stateless `mop check`) and `protocol.py` (the MCP gate,
+`submit_message`/`submit_justification`). **v1 changes only the CLI/core
+path.** The MCP gate stays on legacy advisory behavior for now — a known,
+named inconsistency (a regex match is authoritative under `mop check` but
+advisory under the MCP gate), to be reconciled when the gate is next
+touched. Not a blocker; the CLI is the deliverable.
 
 ## Tasks
 

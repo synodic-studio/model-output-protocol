@@ -1,18 +1,20 @@
 # Rules
 
 Each `*.yml` file in this directory is loaded at MOP startup. Every entry
-contributes either a **rule** (LLM-evaluated, produces a verdict) or a
-**lint** (deterministic pattern check, feeds advisory hints to the
-evaluator). Entries with `active: false` stay visible in the
+is a **rule** with one of three detectors: `llm` (model-judged, produces a
+verdict), `regex` (declarative pattern match), or `script` (external
+command). Entries with `active: false` stay visible in the
 [Studio UI](../web/) but are filtered out of the loaded set. Order does
 not matter.
 
-See [`CONTEXT.md`](../CONTEXT.md) for the definitions of **rule** vs **lint**.
+Deterministic detectors (`regex`, `script`) are **authoritative** — a
+match rejects on its own; the LLM judges only `llm` rules. See
+[`CONTEXT.md`](../CONTEXT.md) for background.
 
 ## Schema
 
-A rule file contains a top-level `rules:` list. Each entry is one of two
-shapes.
+A rule file contains a top-level `rules:` list. Each entry uses one of the
+three detector shapes below.
 
 ### LLM Rule
 
@@ -37,56 +39,58 @@ rules:
       proposed resolution — don't ask permission.
 ```
 
-`parameters.prompt` is a yes/no question handed to the Haiku evaluator.
-Haiku decides whether the agent's message trips the rule and returns one
-of `accept`, `rewrite`, or `reject`.
+`parameters.prompt` is a yes/no question handed to the evaluator model.
+The evaluator decides whether the agent's message trips the rule and
+folds it into the single best-effort-rewrite verdict.
 
 `guidance` is shown to the agent on a rejected verdict so it knows how
 to revise. `description` is for humans.
 
-### Lint (deterministic check)
+### Regex detector (declarative pattern match)
 
 ```yaml
 rules:
   - name: no-commit-hashes
-    lint: true
-    detector: deterministic
+    detector: regex
     description: Don't reference SHAs the user has no use for
     parameters:
-      type: regex
       patterns:
         - "\\b[a-f0-9]{7,}\\b"
 ```
 
-Lints are **non-authoritative hints**. If a pattern matches, the lint
-name is appended to the hints list passed to the LLM evaluator as
-context — the LLM still produces the verdict. A pattern match never on
-its own rejects a message. This keeps regexes from misfiring on
-legitimate uses (a hex color, a hash in a code block) while still
-flagging suspicious shapes to the model.
+`parameters.patterns` is a list of Python-flavor regexes; the rule fires
+if any pattern matches. Fully declarative — no code.
 
-Lints are distinguished from rules by `lint: true` (or in the future by
-their own `lints:` top-level key). Lints without `lint: true` are
-treated as legacy deterministic rules and load the same way.
+### Script detector (anything beyond regex)
 
-Supported `parameters.type` values:
+```yaml
+rules:
+  - name: no-internal-hostnames
+    detector: script
+    description: Don't leak internal hostnames
+    parameters:
+      command: .mop/scripts/check_hostnames.sh
+```
 
-| Type | Extra fields |
-| --- | --- |
-| `regex` | `patterns` — list of Python-flavor regexes |
-| `word_count` | `max` — integer ceiling on `len(text.split())` |
+A `script` detector runs an external command: the message under review is
+piped to the command's **stdin**, and the exit code is the verdict —
+`0` = pass, non-zero = the rule fires. This is how you express checks
+regex can't (word/length counts, entropy scans, schema validation). It is
+language-agnostic and process-isolated; the trust model is the same as a
+git pre-commit hook (it runs a script you placed in your own repo's
+`.mop/`). MOP's own bundled deterministic checks use the same `script`
+detector via an in-process fast path (no subprocess).
 
 ## Fields
 
 | Field | Required | Meaning |
 | --- | --- | --- |
 | `name` | yes | kebab-case identifier, unique across the loaded set |
-| `detector` | yes | `llm` for rules, `deterministic` for lints |
-| `lint` | no | `true` marks this entry as a lint (deterministic, advisory). Omit for LLM rules. |
-| `parameters` | yes | shape depends on detector (above) |
+| `detector` | yes | `llm` (model-judged), `regex` (declarative patterns), or `script` (external command) |
+| `parameters` | yes | shape depends on detector (above): `prompt` for `llm`, `patterns` for `regex`, `command` for `script` |
 | `active` | no | `true` (default) or `false`. Inactive entries are visible in Studio but never reach the evaluator |
 | `description` | no | one-line human summary |
-| `guidance` | no | rules: shown to the agent on rejection. lints: feeds into evaluator prompt as advisory context |
+| `guidance` | no | shown to the agent on rejection; tells it how to revise |
 | `rationale` | no | private commentary, never surfaced to the model |
 | `canonical_example` | no | the prototypical message this entry should catch; used by Studio |
 
@@ -100,9 +104,10 @@ Older rule files load fine.
 3. Test it against a real or synthetic offending message in the
    [MOP Studio](../web/) playground. Run it against the
    [evals](../evals/) corpus to confirm it doesn't fire on clean text.
-4. For rules: if Haiku misjudges, sharpen `parameters.prompt`. Add
-   explicit exceptions for the false positives you saw.
-   For lints: the regex patterns are the only lever.
+4. For `llm` rules: if the evaluator misjudges, sharpen
+   `parameters.prompt`. Add explicit exceptions for the false positives
+   you saw. For `regex`/`script`: the patterns or the command are the
+   only lever.
 
 ## Local project rules (`.mop/`)
 

@@ -21,7 +21,6 @@ rules:
   - name: no-emojis
     detector: regex
     parameters:
-      type: regex
       patterns:
         - "[\U0001f600-\U0001f64f]"
     guidance: "No emojis."
@@ -39,7 +38,7 @@ rules:
     assert rules[1].name == "brevity"
     assert rules[1].detector == "llm"
     assert rules[2].name == "format-score-too-high"
-    assert rules[2].detector == "deterministic"
+    assert rules[2].detector == "script"
     assert rules[2].lint is True
 
 
@@ -74,21 +73,21 @@ def test_collect_regex_hints_returns_matched_rule_names():
         Rule(
             name="no-emojis",
             detector="regex",
-            parameters={"type": "regex", "patterns": [r"\U0001f600"]},
+            parameters={"patterns": [r"\U0001f600"]},
             guidance="No emojis.",
             source_file="style.yml",
         ),
         Rule(
-            name="word-cap",
+            name="too-long-word",
             detector="regex",
-            parameters={"type": "word_count", "max": 5},
-            guidance="Max 5 words.",
+            parameters={"patterns": [r"\blong\b"]},
+            guidance="Avoid the word 'long'.",
             source_file="style.yml",
         ),
     ]
     hints = collect_regex_hints("hello \U0001f600 world this is too long", rules)
     assert "no-emojis" in hints
-    assert "word-cap" in hints
+    assert "too-long-word" in hints
 
 
 def test_load_rules_filters_inactive_by_default(tmp_path: Path):
@@ -170,9 +169,8 @@ def test_load_rules_parses_lint_flag_from_yaml(tmp_path: Path):
 rules:
   - name: inline-code
     lint: true
-    detector: deterministic
+    detector: regex
     parameters:
-      type: regex
       patterns:
         - hello\n  - name: no-permission
     detector: llm
@@ -187,7 +185,7 @@ rules:
     llm_rule = next(r for r in rules if r.name == "no-permission")
     builtin = next(r for r in rules if r.name == "format-score-too-high")
     assert lint_rule.lint is True
-    assert lint_rule.detector == "deterministic"
+    assert lint_rule.detector == "regex"
     assert llm_rule.lint is False
     assert llm_rule.detector == "llm"
     assert builtin.lint is True
@@ -202,18 +200,18 @@ def test_collect_lint_hints_returns_only_lint_matches():
     rules = [
         Rule(
             name="no-emojis",
-            detector="deterministic",
+            detector="regex",
             lint=True,
-            parameters={"type": "regex", "patterns": [r"\U0001f600"]},
+            parameters={"patterns": [r"\U0001f600"]},
             guidance="No emojis.",
             source_file="style.yml",
         ),
         Rule(
-            name="word-cap",
-            detector="deterministic",
+            name="too-long-word",
+            detector="regex",
             lint=True,
-            parameters={"type": "word_count", "max": 5},
-            guidance="Max 5 words.",
+            parameters={"patterns": [r"\blong\b"]},
+            guidance="Avoid the word 'long'.",
             source_file="style.yml",
         ),
         Rule(
@@ -227,7 +225,7 @@ def test_collect_lint_hints_returns_only_lint_matches():
     ]
     hints = collect_lint_hints("hello \U0001f600 world this is too long", rules)
     assert "no-emojis" in hints
-    assert "word-cap" in hints
+    assert "too-long-word" in hints
     assert "llm-prose-rule" not in hints
 
 
@@ -265,7 +263,7 @@ rules:
     )
     rules = load_rules(rules_dir)
     builtin = next(r for r in rules if r.name == "format-score-too-high")
-    assert builtin.detector == "deterministic"
+    assert builtin.detector == "script"
     assert builtin.lint is True
     assert builtin.source_file == "<builtin>"
 
@@ -276,8 +274,8 @@ def test_format_lint_hint_fires_on_long_message():
 
     rule = Rule(
         name="format-score-too-high",
-        detector="deterministic",
-        parameters={"type": "builtin_lint"},
+        detector="script",
+        parameters={},
         guidance="...",
         source_file="<builtin>",
         lint=True,
@@ -292,8 +290,8 @@ def test_format_lint_hint_does_not_fire_on_short_message():
 
     rule = Rule(
         name="format-score-too-high",
-        detector="deterministic",
-        parameters={"type": "builtin_lint"},
+        detector="script",
+        parameters={},
         guidance="...",
         source_file="<builtin>",
         lint=True,
@@ -415,8 +413,58 @@ def test_merge_local_inactive_silences_builtin():
 def test_merge_dedupes_builtin_lints():
     """load_rules appends registered builtin lints per call; merge dedupes them."""
     lint = Rule(
-        "format-score-too-high", "deterministic", {"type": "builtin_lint"},
+        "format-score-too-high", "script", {},
         "g", "<builtin>", lint=True,
     )
     merged = merge_rules([lint], [lint])
     assert len(merged) == 1
+
+
+# ---------------------------------------------------------------------------
+# script detector — external command (stdin in, exit code = verdict)
+# ---------------------------------------------------------------------------
+
+
+def _write_script(path: Path, body: str) -> Path:
+    import os
+    import stat
+
+    path.write_text(body)
+    path.chmod(path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    return path
+
+
+def test_script_detector_fires_on_nonzero_exit(tmp_path: Path):
+    """A `script` rule fires when its command exits non-zero, reading stdin."""
+    from mop.rules import _rule_matches
+
+    checker = _write_script(
+        tmp_path / "check.sh",
+        "#!/bin/sh\nif grep -q BAD; then exit 1; else exit 0; fi\n",
+    )
+    rule = Rule(
+        name="no-bad-word",
+        detector="script",
+        parameters={"command": str(checker)},
+        guidance="Remove BAD.",
+        source_file="local.yml",
+    )
+    assert _rule_matches(rule, "this is BAD") is True
+    assert _rule_matches(rule, "this is fine") is False
+
+
+def test_script_detector_raises_when_command_missing(tmp_path: Path):
+    """A command that can't run raises rather than silently passing."""
+    import pytest
+
+    from mop.rules import _rule_matches
+
+    rule = Rule(
+        name="broken",
+        detector="script",
+        parameters={"command": str(tmp_path / "does-not-exist.sh")},
+        guidance="",
+        source_file="local.yml",
+    )
+    with pytest.raises(RuntimeError, match="failed to run"):
+        _rule_matches(rule, "anything")

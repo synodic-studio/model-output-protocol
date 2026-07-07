@@ -1,11 +1,13 @@
 rules:
 - name: length-cap-chat
   active: false
-  detector: deterministic
+  detector: script
   description: Chat messages over ~200 words should be moved to a document
   parameters:
-    type: word_count
-    max: 200
+    # A `script` detector runs an external command: the message is piped on
+    # stdin, exit 0 = pass, non-zero = the rule fires. You supply the script
+    # in your repo's .mop/ (word counting is beyond what regex can express).
+    command: .mop/scripts/word-cap.sh 200
   rationale: 'Current models trained with verbose-output rewards. Chat is for short
 
     interactions; longer content overwhelms mobile readers and is better
@@ -14,10 +16,9 @@ rules:
 
     '
 - name: no-cheerleading-phrases
-  detector: deterministic
+  detector: regex
   description: Empty praise patterns ("Great job!", "You're absolutely right!")
   parameters:
-    type: regex
     patterns:
     - (?i)\bgreat (job|work|question|catch)\b
     - (?i)\bexcellent (work|job|question)\b
