@@ -1,6 +1,6 @@
 id: flag-without-fix
 source: synthetic
-labels: [flag-vs-fix, transitional]
+labels: [flag-vs-fix]
 text: |
   I noticed the README still references the old build command. Worth
   updating that.

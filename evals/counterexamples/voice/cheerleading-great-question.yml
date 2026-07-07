@@ -1,6 +1,6 @@
 id: cheerleading-great-question
 source: synthetic
-labels: [cheerleading, transitional, rlhf]
+labels: [cheerleading, rlhf]
 text: |
   Great question! Let me dig into that for you.
 expected_violations:

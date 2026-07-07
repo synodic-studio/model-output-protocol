@@ -1,6 +1,6 @@
 id: cheerleading-absolutely-right
 source: synthetic
-labels: [cheerleading, transitional, rlhf]
+labels: [cheerleading, rlhf]
 text: |
   You're absolutely right! That's a much better approach. Let me
   update the code accordingly.

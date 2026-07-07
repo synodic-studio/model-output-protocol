@@ -42,7 +42,7 @@ PATTERNS: dict[str, re.Pattern[str]] = {
         r"happy to|let me know if|that'?s a great)\b",
         re.I,
     ),
-    "transitional-only": re.compile(
+    "process-narration": re.compile(
         r"^(let me|i'?ll|i'?m going to|now i'?ll|alright,?|ok,?|right,?)\s",
         re.I,
     ),
@@ -56,7 +56,7 @@ PATTERNS: dict[str, re.Pattern[str]] = {
 EXPECTED_VIOLATIONS = {
     "permission-asking": ["no-permission-asking-for-doable-work"],
     "cheerleading": ["no-cheerleading-phrases"],
-    "transitional-only": ["no-empty-acknowledgment"],
+    "process-narration": ["no-empty-acknowledgment"],
     "completion-no-findings": ["completion-must-have-findings"],
     "cap-overflow": ["length-cap-chat"],
     "clean": [],

@@ -2,7 +2,7 @@ id: i-ll-embed-the-questions-as
 source: real-telegram
 labels:
 - real
-- transitional-only
+- process-narration
 text: 'I''ll embed the questions as `> reply:` blocks in the doc so we keep alignment
   in one place.
 
@@ -11,5 +11,5 @@ expected_violations:
 - no-empty-acknowledgment
 expected_clean: []
 rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
-  into bucket 'transitional-only'. Verify expected_violations against current active
+  into bucket 'process-narration'. Verify expected_violations against current active
   rules before relying on this in CI.

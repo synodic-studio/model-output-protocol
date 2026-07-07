@@ -1,6 +1,6 @@
 id: permission-asking
 source: synthetic
-labels: [permission, transitional, rlhf]
+labels: [permission, rlhf]
 text: |
   I see the failing test. Want me to fix it?
 expected_violations:

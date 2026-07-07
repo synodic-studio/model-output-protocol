@@ -1,6 +1,6 @@
 id: permission-asking-run-tests
 source: synthetic
-labels: [permission, transitional, rlhf]
+labels: [permission, rlhf]
 text: |
   Can I go ahead and run the tests?
 expected_violations:

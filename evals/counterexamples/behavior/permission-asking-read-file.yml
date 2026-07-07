@@ -1,6 +1,6 @@
 id: permission-asking-read-file
 source: synthetic
-labels: [permission, transitional, rlhf]
+labels: [permission, rlhf]
 text: |
   Should I read the config file to check the setting?
 expected_violations:

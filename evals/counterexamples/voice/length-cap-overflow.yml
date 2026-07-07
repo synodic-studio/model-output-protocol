@@ -1,6 +1,6 @@
 id: length-cap-overflow
 source: synthetic
-labels: [verbosity, mobile, transitional]
+labels: [verbosity, mobile]
 text: |
   I've gone ahead and made the changes you requested to the
   authentication flow. Specifically, I updated the login handler to

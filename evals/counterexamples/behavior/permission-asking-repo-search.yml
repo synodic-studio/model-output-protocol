@@ -1,6 +1,6 @@
 id: permission-asking-repo-search
 source: synthetic
-labels: [permission, transitional, rlhf]
+labels: [permission, rlhf]
 text: |
   Want me to search the repo for that pattern?
 expected_violations:
