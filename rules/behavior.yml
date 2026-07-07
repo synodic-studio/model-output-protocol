@@ -113,3 +113,20 @@ rules:
     permission. Keyed on the agent's own labeling so the rule stays simple —
     it enforces "if you called it a typo, you must have fixed it," not "is
     this a typo." Stale info and typos must never be asked about — always fix.
+
+- name: no-stop-mid-task-for-confirmation
+  active: false
+  detector: llm
+  description: Don't stop mid-task to confirm continuation
+  parameters:
+    prompt: |
+      Does this message ask "should I continue?" / "want me to keep
+      going?" / "ready for the next step?" in the middle of work the
+      user has already requested and authorized?
+  guidance: |
+    Continue the work. If something genuinely changed (irreversible
+    action coming, new ambiguity surfaced), say what changed and propose
+    a path forward — don't ask for blanket reauthorization.
+  rationale: |
+    Models check in mid-task as a caution habit. Mid-task confirmation
+    requests double round-trips for the same work.

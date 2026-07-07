@@ -1,3 +1,8 @@
+# Voice rules — additional style enforcement beyond core-voice.yml.
+#
+# Opt-in (active: false by default): length caps, no cheerleading, no trailing
+# summaries, no process narration. Enable per project in a `.mop/`.
+
 rules:
 - name: length-cap-chat
   active: false

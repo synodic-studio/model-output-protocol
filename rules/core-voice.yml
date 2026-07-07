@@ -1,11 +1,9 @@
-# Core voice rules — enduring style enforcement.
+# Core voice rules — how the agent says it.
 #
-# Rules here apply to every user by default and are NOT expected to deprecate
-# as models improve. They reflect truth and communication universals, not
-# model-era artifacts.
-#
-# All rules are restored with `active: false` after a prior simplification
-# pass deleted them outright. Flip the toggle in MOP Studio to enable any.
+# Rules here apply to every user by default; they reflect communication
+# universals (attribute honestly, link references, label lists, don't ping
+# without a finding). Rules ship `active: false`; set `active: true` here or
+# enable them in a project's `.mop/`. More voice rules live in `voice.yml`.
 
 rules:
 

@@ -1,15 +1,12 @@
-# Core behavior rules — enduring behavior enforcement.
+# Core behavior rules — the agent doing the wrong THING.
 #
-# Rules here apply to every user by default and are NOT expected to deprecate
-# as models improve. They catch the agent doing the wrong THING in a way that
-# any future model would also be wrong to do.
+# Rules here apply to every user by default. They catch behavioral failures
+# (permission-asking, delegating back, flagging instead of fixing, stopping
+# mid-task) that any future model would also be wrong to do.
 #
-# All rules are restored with `active: false` after a prior simplification
-# pass deleted them outright. Flip the toggle in MOP Studio (or set
-# `active: true` here) to load any of them into the evaluator.
-#
-# (Behavior rules that exist to patch current model behavior live in
-# `transitional-behavior.yml`.)
+# Rules ship `active: false`; set `active: true` here, or enable them in a
+# project's `.mop/`, to load them into the evaluator. Additional behavior
+# rules live in `behavior.yml`.
 
 rules:
 
