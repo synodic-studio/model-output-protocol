@@ -75,19 +75,37 @@ rules:
 A `script` detector runs an external command: the message under review is
 piped to the command's **stdin**, and the exit code is the verdict —
 `0` = pass, non-zero = the rule fires. This is how you express checks
-regex can't (word/length counts, entropy scans, schema validation). It is
+regex can't (entropy scans, schema validation). It is
 language-agnostic and process-isolated; the trust model is the same as a
 git pre-commit hook (it runs a script you placed in your own repo's
 `.mop/`). MOP's own bundled deterministic checks use the same `script`
 detector via an in-process fast path (no subprocess).
+
+### Length detector (character / word caps)
+
+```yaml
+rules:
+  - name: length-cap-chat
+    detector: length
+    description: Chat messages over ~200 words belong in a document
+    parameters:
+      max_words: 200      # and/or max_chars: 3000
+```
+
+`length` fires when a configured cap is exceeded — set `max_chars`,
+`max_words`, or both (any exceeded cap fires). It's declarative (no
+script), and the number is **tuned per interface**: a chat channel might
+cap at 200 words while a web UI allows 3000, each set in that deployment's
+own `.mop/`. A length violation is authoritative, and the LLM rewrite pass
+may shorten the message (the cap is re-checked against the rewrite).
 
 ## Fields
 
 | Field | Required | Meaning |
 | --- | --- | --- |
 | `name` | yes | kebab-case identifier, unique across the loaded set |
-| `detector` | yes | `llm` (model-judged), `regex` (declarative patterns), or `script` (external command) |
-| `parameters` | yes | shape depends on detector (above): `prompt` for `llm`, `patterns` for `regex`, `command` for `script` |
+| `detector` | yes | `llm` (model-judged), `regex` (patterns), `script` (external command), or `length` (char/word caps) |
+| `parameters` | yes | shape depends on detector: `prompt` for `llm`, `patterns` for `regex`, `command` for `script`, `max_chars`/`max_words` for `length` |
 | `active` | no | `true` (default) or `false`. Inactive entries are visible in Studio but never reach the evaluator |
 | `description` | no | one-line human summary |
 | `guidance` | no | shown to the agent on rejection; tells it how to revise |

@@ -1,0 +1,24 @@
+id: labeled-lists-clean
+source: synthetic
+labels: [formatting, references, chat]
+text: |
+  Here's the plan for the migration:
+
+  1. Back up the production database first
+  2. Run the schema migration in a transaction
+  3. Verify row counts match before and after
+  4. Flip the feature flag once checks pass
+
+  And two options for when to run it:
+
+  A. Tonight during the low-traffic window
+  B. Tomorrow morning with the team on standby
+
+  Which option do you want?
+expected_violations: []
+expected_clean:
+  - labeled-lists
+rationale: |
+  Negative control. The ordered sequence uses numbers; the unordered choice
+  set uses CAPITAL letters. Every item is citable ("do B") — the rule must
+  NOT fire here.

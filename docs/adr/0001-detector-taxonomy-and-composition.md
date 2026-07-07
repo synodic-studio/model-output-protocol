@@ -24,6 +24,19 @@ machinery than the problem needed and slowed shipping.
   name via `register_builtin_lint` (MOP's bundled checks keep this fast path —
   no process spawn).
 
+> **Update (2026-07-06): a fourth detector, `length`, was added.** It is
+> declarative (`parameters.max_chars` and/or `max_words`; fires if any cap is
+> exceeded), so it needs no external script and runs fast against the eval
+> corpus. Rationale: message-length capping is common, numeric, and
+> **configurable per interface** (tight for chat, loose for a web UI), and it
+> was left homeless when `word_count` was removed. It earns first-class status
+> over routing every length check through `script`. This walks back a slice of
+> the "exactly three" decision but *not* the thing we disliked — it's a
+> top-level detector, not a `parameters.type` sub-dispatch. See also
+> [ADR-0002](0002-deterministic-authority-and-verdict-shape.md): a length
+> violation is deterministic-authoritative, and the one LLM call may shorten
+> the message, with the cap re-checked against the rewrite.
+
 **Composition is two flat layers, no magic:**
 - Optional **built-ins** (base) + one local **`.mop/`** layer on top. Local
   overrides a same-name built-in; `active: false` silences one.

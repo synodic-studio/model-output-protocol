@@ -85,3 +85,24 @@ rules:
       When "the universal link" conveys the same information as
       `CheckInURLAction.decide`, the prose should use the noun phrase. The
       agent has the code in context; the user has the screen.
+
+  - name: labeled-lists
+    active: false
+    detector: llm
+    description: Lists must be labeled for reference — numbers for ordered, CAPITAL letters for unordered; no plain bullets
+    guidance: |
+      Label every list item so the user can cite it back. Use numbers
+      (1, 2, 3) for ordered or sequential lists and CAPITAL letters
+      (A, B, C) for unordered lists. Never use plain bullets (-, *, •).
+    parameters:
+      prompt: |
+        Does this message present a list with plain bullets (-, *, •) or
+        otherwise unlabeled items, instead of labels the user can cite back?
+        Lists must be labeled: numbers (1, 2, 3) for ordered / sequential
+        lists, CAPITAL letters (A, B, C) for unordered lists.
+        NOT a violation: a single inline item, content inside code blocks
+        or fences, or prose that merely contains a dash.
+    rationale: |
+      The user references list items back by label ("do B", "redo 2") in
+      voice/chat. Plain bullets can't be cited in shorthand. Capital letters
+      read cleanly against lowercase prose.

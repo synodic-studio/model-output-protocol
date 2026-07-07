@@ -1,0 +1,20 @@
+id: labeled-lists-plain-bullets
+source: synthetic
+labels: [formatting, references, chat]
+text: |
+  Here's the plan for the migration:
+
+  - Back up the production database first
+  - Run the schema migration in a transaction
+  - Verify row counts match before and after
+  - Flip the feature flag once checks pass
+
+  Let me know which part you want me to start with.
+expected_violations:
+  - labeled-lists
+expected_clean:
+  - no-fabricated-attribution
+rationale: |
+  A multi-item list rendered with plain "-" bullets. The user can't cite an
+  item back ("do the second one") in chat shorthand. This is an ordered
+  sequence, so it should be numbered 1/2/3/4.
