@@ -6,123 +6,74 @@ The name is a wink at the [Model Context Protocol](https://modelcontextprotocol.
 
 ## The problem
 
-LLM agents drift. Voice rules in the system prompt get crowded out by task instructions. Reminders in CLAUDE.md decay across long sessions. The result: messages that are too long, too short, too cheerleady, ask permission instead of acting, narrate process instead of stating outcomes.
+LLM agents drift. Voice rules in the system prompt get crowded out by task instructions. Reminders in CLAUDE.md decay across long sessions. The result: messages that are too long, too cheerleady, ask permission instead of acting, delegate work back to the user, narrate process instead of stating outcomes.
 
-Stuffing more rules in the system prompt does not fix this. The agent's context is already saturated with the task.
+Stuffing more rules in the system prompt does not fix this — the agent's context is already saturated with the task. MOP moves voice enforcement *out* of the agent and into a thin layer that inspects each message.
 
-MOP solves it by moving voice enforcement *out* of the agent and into a thin protocol layer the agent must call to reach the human.
+## Two surfaces
 
-## Flow
+MOP is one core (`mop.rules`, `mop.evaluators`, `mop.types`) with two ways to call it:
 
-```mermaid
-flowchart TD
-    AGENT[Coding agent] -->|"submit_message(text)"| MCP["MOP MCP tools (in-process)"]
-    RULES[(rules/*.yml)] -.->|loaded| MCP
-    MCP --> EVAL["Haiku call: accept | rewrite | reject"]
-    HINTS["regex hints (advisory)"] -.->|context| EVAL
-    EVAL --> APPLY{"verdict"}
-    APPLY -->|Accepted| DELIVER([deliver original to user])
-    APPLY -->|Rewritten| DELIVER2([deliver rewritten to user])
-    APPLY -->|Rejected| PEND["pending_message = text<br/>agent sees violations"]
-    PEND --> JUSTIFY["submit_justification(reason)"]
-    JUSTIFY --> EVAL2["Haiku re-eval with justification"]
-    EVAL2 --> APPLY
-    JUSTIFY -.->|"after 4 attempts"| FAILOPEN["AcceptedFailedOpen:<br/>deliver original + system_note"]
-    DELIVER --> STOP["Stop hook: turn ends"]
-    DELIVER2 --> STOP
-    FAILOPEN --> STOP
-```
+1. **`mop check` — a stateless CLI** (the primary, shipped path). Pipe a message in, get a verdict and exit code out. No agent runtime, no MCP server. This is how a host gates outbound text.
+2. **In-process MCP gate** (`mop/protocol.py`, `mop/mcp.py`) — a stateful adapter exposing `submit_message` / `submit_justification` as MCP tools, with a justification loop and failed-open. Still present; treated as the legacy path while integrations standardize on the CLI.
 
-## How it works
+## How evaluation works
 
-MOP exposes itself to the agent as four MCP tools — typically mounted **in-process** via `claude_agent_sdk.create_sdk_mcp_server`:
+Rules carry one of four **detectors**:
 
-| Tool | Purpose |
-|---|---|
-| `submit_message(text)` | The agent's only path to the user. Triggers an LLM evaluation against the active rules. |
-| `submit_justification(reason)` | Argues for delivering a previously-rejected message. Bounded by `max_justification_attempts = 4`. |
-| `get_rules(filter?)` | Read-only — returns active rule names + descriptions, optionally filtered by regex. |
-| `get_status()` | Returns `(pending_message, sent_this_turn, justification_attempts)` for self-recovery. |
+| Detector | Fires when | Authority |
+|---|---|---|
+| `llm` | the evaluator model judges it does (carries a `prompt`) | model call |
+| `regex` | a declarative pattern matches (`patterns`) | **deterministic — authoritative** |
+| `script` | an external command exits non-zero (`command`, message on stdin) | **deterministic — authoritative** |
+| `length` | a char/word cap is exceeded (`max_chars`/`max_words`) | **deterministic — authoritative** |
 
-A single Haiku call evaluates each submission and returns one of four `Verdict` types:
+A single evaluation runs the deterministic rules first (a match is a hard violation the model cannot wave away), then **one** LLM call judges the `llm` rules and produces a best-effort rewrite that also repairs the deterministic hits. The deterministic rules are re-checked against the rewrite.
 
-- **`Accepted`** — message is delivered as-is via the host's injected `deliver(text, system_note?)` callable.
-- **`Rewritten(rewritten)`** — Haiku reformed the message; the rewritten version is delivered, and the agent learns the diff via the tool result.
-- **`Rejected(violations)`** — message becomes `pending_message`; the agent must call `submit_justification` to argue for delivery.
-- **`AcceptedFailedOpen(system_note)`** — justification budget exhausted; original is delivered with a system-note bubble warning the user that rules were bypassed.
+The **verdict is derived**, never declared by the model — computed from *(did the text change? is `unresolved` empty?)*:
 
-A `Stop` hook gates turn-end on `sent_message_this_turn`, ensuring the agent sends *something* every turn instead of silently completing.
+- **`Accepted`** — nothing changed, nothing unresolved.
+- **`Rewritten(rewritten, unresolved)`** — the evaluator rewrote it; `unresolved` lists anything it couldn't fix (the "partial" case).
+- **`Rejected(unresolved)`** — nothing was fixable; the residual violations are the agent's to handle.
+- **`AcceptedFailedOpen(system_note)`** — MCP-gate-only escape hatch after the justification budget is exhausted.
 
-The agent never streams text directly to the user. The MCP tool result is what the agent sees, so references like "do option b" resolve naturally in its own context.
-
-## Integration shape
-
-MOP is transport-agnostic and LLM-agnostic. Hosts inject:
-
-- **`evaluator(text, regex_hints, justification?)`** — async callable returning a Verdict. The reference adapter `mop.build_haiku_evaluator` wraps Anthropic Haiku via pydantic-ai.
-- **`deliver(text, system_note?)`** — async callable that gets the message in front of the user. Whatever channel the host owns (Telegram, Slack, web socket, …).
-
-Plus `mop.protocol_prompt(rules)` — a pure function the host concatenates into `ClaudeAgentOptions.system_prompt` so the agent knows the protocol exists.
-
-See `mop/protocol.py` for the `MOP` class and `mop/mcp.py` for the in-process MCP wiring.
+See [`docs/adr/`](docs/adr/) for the decisions behind all of this, and [`CONTEXT.md`](CONTEXT.md) for the glossary.
 
 ## CLI
 
-MOP ships a standalone `mop` console command for one-shot checks and rule inspection — no MCP server, no agent runtime needed:
-
 ```bash
-echo "Sounds great, shipping it!" | mop check --json
-mop check --file draft.md --model anthropic/claude-haiku-4-5-20251001
-mop rules            # resolved active rule set (built-ins + .mop/)
+echo "Sounds great, shipping it!" | mop check --json      # verdict + exit code
+mop check --file draft.md --builtins                       # include packaged rules
+mop check --no-rewrite < draft.md                          # judge only (CI/lint)
+mop rules list --builtins                                  # inspect the resolved rule set
 ```
 
-**Exit codes** (for `mop check`): 0 accepted, 1 rewritten, 2 rejected, 3 usage/runtime error. A harness can script around them.
+- **Exit codes:** `0` accepted, `1` rewritten, `2` rejected, `3` usage/runtime error.
+- **Built-ins are opt-in:** `mop check` runs only your local `.mop/` rules unless you pass `--builtins`. With no rules at all it warns `no active rules — MOP enforced nothing` and accepts (exit 0) — it never imposes defaults or hard-fails a fresh repo.
+- **`.mop/` discovery:** walks up from the cwd to the first `.git` ancestor. Local rules layer over the (opt-in) built-ins — same-name replaces, `active: false` silences.
+- **Observability:** set `MOP_AUDIT_LOG=<dir>` to append every verdict to a daily-rotated JSONL flight recorder.
 
-**`.mop/` discovery**: CLI walks up from the current directory looking for a `.mop/` directory containing `*.yml` rule files, stopping at the first directory with `.git` (the repo root). Packaged built-ins form the base layer; local rules are merged on top — same-name replaces, everything else unions, `active: false` silences a built-in.
+See [`mop/cli.py`](mop/cli.py).
 
-**Evaluator selection**: set `MOP_EVALUATOR_MODEL` to a litellm `` "provider/model" `` string (e.g. `anthropic/claude-haiku-4-5-20251001`), or pass `--model` to the `check` command. Legacy `MOP_EVALUATOR=deepseek|haiku` is still honored as a fallback alias.
+## Evaluator
 
-See [`mop/cli.py`](mop/cli.py) for the implementation.
+MOP calls [litellm](https://github.com/BerriAI/litellm) in-process and owns its own tier aliases (`mop.evaluators.MODEL_ALIASES`): `small` (default) = `deepseek/deepseek-v4-flash`, with provisional `medium`/`large`. Select with `--model <tier|provider/model>` or `MOP_EVALUATOR_MODEL`. Structured output degrades gracefully across providers (json_schema → json_object → prompt-only), validated by pydantic. MOP is evaluator-agnostic — a host can inject any callable matching the `Evaluator` signature.
 
-## Examples
+## Integration shape (MCP gate)
 
-Real Haiku verdicts against three sample agent messages, run through `mop.build_haiku_evaluator` with three rules: `no-permission-asking-for-doable-work`, `no-commit-hashes` ("user has no interest in SHAs"), and `no-environment-vars` ("user does not configure env vars by hand").
-
-### ✅ Accepted
-
-> Done — bridge restarted, photo handling works end-to-end. Single sendMessage out per turn, no traceback in the log.
-
-`verdict = Accepted()` — clean status report, no rule trips. Delivered as-is.
-
-### ✏️ Rewritten
-
-**Input:**
-> Pushed commit a1b2c3d4 to develop. The fix in bridge.py:638 captures MOP_RULES_DIR in post_init and threads it through build_options.
-
-**Output:**
-> Updated develop with a fix in bridge.py that captures the MOP rules directory during initialization and passes it through the build options.
-
-`verdict = Rewritten(...)` — Haiku stripped the SHA and softened the env-var name. The agent sees the rewritten text in its tool result, so any later "the fix from before" reference resolves to the polished version.
-
-### 🛑 Rejected
-
-> Want me to grep the codebase for other places that import ClaudeSdkMopHarness so we know nothing else still relies on run_turn?
-
-`verdict = Rejected(violations=["no-permission-asking-for-doable-work"])` — agent has the tools to grep, so asking permission burns a round-trip. The message becomes `pending_message`. To deliver, the agent must call `submit_justification` *or* (better) actually run the grep and report what it found.
-
-## Status
-
-Alpha. Live in [patchbay-relay](https://github.com/synodic-studio/patchbay-relay) on the `cc-sdk-mop` harness.
+For the stateful gate, hosts inject an `evaluator` (built via `mop.build_evaluator(rules=...)`) and a `deliver(text, system_note?)` callable for whatever channel they own (Telegram, Slack, web socket). `mop.protocol_prompt(rules)` returns a system-prompt fragment so the agent knows the protocol exists. See `mop/protocol.py` and `mop/mcp.py`.
 
 ## Evals
 
-Rules are validated against a corpus of counterexamples in [`evals/`](evals/). Each rule has positive and negative example messages it should (or should not) flag. Run `uv run python evals/harness.py` to check the corpus against the deterministic rules.
+Rules are validated against a counterexample corpus in [`evals/`](evals/) — positive and negative example messages each rule should (or should not) flag. Run `uv run python evals/harness.py` for the deterministic rules, add `--llm` (and an API key) for `llm` rules, or `--rule <name>` to target one.
+
+## Status
+
+Alpha. Core + `mop check` CLI shipped and tested. First-rule integration into [patchbay-relay](https://github.com/synodic-studio/patchbay-relay) is in progress (Relay is pi-only now; the earlier in-process `cc-sdk-mop` harness was retired, so integration is a `mop check` call in the send path).
 
 ## Companion
 
-[HOP — Human Output Protocol](https://github.com/synodic-studio/human-output-protocol). The decoder side: helps humans compose more productive messages to high-context agents from low-bandwidth interfaces (mobile, voice).
-
-Together, MOP and HOP form the I/O contract for the agent-human interface. Like Swift's `Codable`, but for human bandwidth limits.
+[HOP — Human Output Protocol](https://github.com/synodic-studio/human-output-protocol). The decoder side: helps humans compose more productive messages to high-context agents from low-bandwidth interfaces (mobile, voice). Together, MOP and HOP form the I/O contract for the agent-human interface.
 
 ## License
 
