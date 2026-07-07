@@ -1,13 +1,12 @@
 # Rules
 
 Each `*.yml` file in this directory is loaded at MOP startup. Every entry
-is a **rule** with one of three detectors: `llm` (model-judged, produces a
-verdict), `regex` (declarative pattern match), or `script` (external
-command). Entries with `active: false` stay visible in the
-[Studio UI](../web/) but are filtered out of the loaded set. Order does
-not matter.
+is a **rule** with one of four detectors: `llm` (model-judged, produces a
+verdict), `regex` (declarative pattern match), `script` (external
+command), or `length` (char/word caps). Entries with `active: false` stay
+in the YAML but are filtered out of the loaded set. Order does not matter.
 
-Deterministic detectors (`regex`, `script`) are **authoritative** — a
+Deterministic detectors (`regex`, `script`, `length`) are **authoritative** — a
 match rejects on its own; the LLM judges only `llm` rules. See
 [`CONTEXT.md`](../CONTEXT.md) for background.
 
@@ -106,11 +105,11 @@ may shorten the message (the cap is re-checked against the rewrite).
 | `name` | yes | kebab-case identifier, unique across the loaded set |
 | `detector` | yes | `llm` (model-judged), `regex` (patterns), `script` (external command), or `length` (char/word caps) |
 | `parameters` | yes | shape depends on detector: `prompt` for `llm`, `patterns` for `regex`, `command` for `script`, `max_chars`/`max_words` for `length` |
-| `active` | no | `true` (default) or `false`. Inactive entries are visible in Studio but never reach the evaluator |
+| `active` | no | `true` (default) or `false`. Inactive entries stay in the YAML but never reach the evaluator |
 | `description` | no | one-line human summary |
 | `guidance` | no | shown to the agent on rejection; tells it how to revise |
 | `rationale` | no | private commentary, never surfaced to the model |
-| `canonical_example` | no | the prototypical message this entry should catch; used by Studio |
+| `canonical_example` | no | the prototypical message this entry should catch |
 
 Legacy fields like `severity` and `on_violation` are silently ignored.
 Older rule files load fine.
@@ -119,9 +118,9 @@ Older rule files load fine.
 
 1. Add the rule file (or append to an existing one).
 2. Restart any host using MOP so the new rule loads.
-3. Test it against a real or synthetic offending message in the
-   [MOP Studio](../web/) playground. Run it against the
-   [evals](../evals/) corpus to confirm it doesn't fire on clean text.
+3. Test it with `mop check` on a real or synthetic offending message, and
+   run it against the [evals](../evals/) corpus (`python evals/harness.py
+   --rule <name>`) to confirm it doesn't fire on clean text.
 4. For `llm` rules: if the evaluator misjudges, sharpen
    `parameters.prompt`. Add explicit exceptions for the false positives
    you saw. For `regex`/`script`: the patterns or the command are the
@@ -164,8 +163,8 @@ with `--builtins`):
 
 Rules with `active: false` in the packaged files (e.g.
 `no-completed-without-findings-pings`, `acknowledgment-without-action`,
-`verify-before-asserting`, `no-empty-future-commitments`) are visible
-in Studio but do not reach the evaluator unless a local `.mop/` entry
+`verify-before-asserting`, `no-empty-future-commitments`, `labeled-lists`)
+ship inactive and do not reach the evaluator unless a local `.mop/` entry
 re-enables them.
 
 ## Personal overlays

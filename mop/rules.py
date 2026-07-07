@@ -2,10 +2,10 @@
 
 Rules live in YAML files under a flat `rules/` directory. Each rule may
 carry an `active: true|false` flag (default `true`). `load_rules()`
-returns only active rules — inactive rules are visible in the Studio UI
-but never reach the evaluator. The LLM's verdict is the disposition;
-legacy `severity` and `on_violation` fields on a rule are silently
-ignored if present.
+returns only active rules — inactive rules stay in the YAML (and are
+listed by `mop rules --json` with `include_inactive`) but never reach the
+evaluator. The LLM's verdict is the disposition; legacy `severity` and
+`on_violation` fields on a rule are silently ignored if present.
 
 Regex hints are a non-authoritative prelim pass. Any rule whose
 detector is `regex` and whose pattern matches the message contributes
@@ -88,9 +88,9 @@ def load_rules(rules_dir: Path, *, include_inactive: bool = False) -> list[Rule]
 
     By default, only rules with `active: true` (or no `active` field) are
     returned. Pass `include_inactive=True` to get every rule regardless
-    of flag — useful for the Studio UI which wants to surface inactive
-    rules so users can toggle them on. Ignores legacy `severity` /
-    `on_violation` fields.
+    of flag — useful for `mop rules` listing and for the layered merge,
+    where a local `active: false` entry must be seen to silence a
+    built-in. Ignores legacy `severity` / `on_violation` fields.
 
     Built-in lints (registered via ``register_builtin_lint()``) are
     automatically appended to every result.

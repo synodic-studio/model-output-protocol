@@ -12,8 +12,8 @@ The public surface lives in [`__init__.py`](__init__.py). Hosts import everythin
 | [`hooks.py`](hooks.py) | `protocol_prompt(rules)` builds the system-prompt snippet that tells the agent the MOP tools exist. `stop(mop)` is the body of the Stop hook — returns `Block` if the agent tried to end a turn without sending. |
 | [`mcp.py`](mcp.py) | `build_mcp_server(mop)` wraps the `MOP` instance in an in-process MCP server exposing `submit_message`, `submit_justification`, `get_rules`, `get_status`. |
 | [`audit.py`](audit.py) | `Auditor` Protocol + default `JsonlAuditor`. Called once per verdict with the original text, the verdict payload, the rule names active at evaluation time, the attempt counter, and any justification. |
-| [`format_score.py`](format_score.py) | Heuristic scoring for message shape (line length, paragraph breaks, etc.). Used by evals and Studio's "score this output" affordance. Not part of the verdict loop. |
-| [`display_metrics.py`](display_metrics.py) | Aggregates `format_score.py` numbers for the Studio display. Also not in the verdict loop. |
+| [`format_score.py`](format_score.py) | Heuristic scoring for message shape (line length, paragraph breaks, etc.). Backs the `format-score-too-high` built-in check and the eval corpus. |
+| [`display_metrics.py`](display_metrics.py) | Low-level shape metrics (word/char/line counts, max line width) that `format_score.py` aggregates. |
 
 ## Reading order
 
