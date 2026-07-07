@@ -102,6 +102,34 @@ def test_resolve_model_env_var(monkeypatch):
     assert resolve_model() == "anthropic/claude-haiku-4-5-20251001"
 
 
+def test_resolve_model_small_alias(monkeypatch):
+    monkeypatch.delenv("MOP_EVALUATOR_MODEL", raising=False)
+    monkeypatch.delenv("MOP_EVALUATOR", raising=False)
+    assert resolve_model("small") == "deepseek/deepseek-v4-flash"
+
+
+def test_resolve_model_tier_aliases_cover_all_three():
+    assert resolve_model("small") == "deepseek/deepseek-v4-flash"
+    assert resolve_model("medium") == "deepseek/deepseek-v4-pro"
+    assert resolve_model("large") == "anthropic/claude-sonnet-5"
+
+
+def test_resolve_model_alias_via_env(monkeypatch):
+    monkeypatch.delenv("MOP_EVALUATOR", raising=False)
+    monkeypatch.setenv("MOP_EVALUATOR_MODEL", "small")
+    assert resolve_model() == "deepseek/deepseek-v4-flash"
+
+
+def test_resolve_model_default_is_small(monkeypatch):
+    monkeypatch.delenv("MOP_EVALUATOR_MODEL", raising=False)
+    monkeypatch.delenv("MOP_EVALUATOR", raising=False)
+    assert resolve_model() == "deepseek/deepseek-v4-flash"
+
+
+def test_resolve_model_raw_provider_model_passes_through():
+    assert resolve_model("openai/gpt-4o-mini") == "openai/gpt-4o-mini"
+
+
 def test_resolve_model_legacy_deepseek_alias(monkeypatch):
     monkeypatch.delenv("MOP_EVALUATOR_MODEL", raising=False)
     monkeypatch.setenv("MOP_EVALUATOR", "deepseek")

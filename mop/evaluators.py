@@ -34,7 +34,19 @@ from typing import Awaitable, Callable
 from .rules import Rule
 from .types import EvalLLMResponse, Verdict, verdict_from_eval_response
 
-DEFAULT_MODEL = "deepseek/deepseek-chat"
+# MOP owns its own small/medium/large tier aliases and populates them here
+# rather than relying on any host's model config (pi/patchbay-voice resolve
+# these through pi, NOT raw litellm — MOP calls litellm directly, so it must
+# define the map itself). `small` is the default evaluator: cheap, fast, good
+# enough to judge a rule and rewrite a message. medium/large are provisional
+# house defaults for callers who want a stronger judge; adjust as needed.
+MODEL_ALIASES = {
+    "small": "deepseek/deepseek-v4-flash",   # DeepSeek V4 Flash (confirmed litellm id)
+    "medium": "deepseek/deepseek-v4-pro",    # provisional
+    "large": "anthropic/claude-sonnet-5",    # provisional frontier judge
+}
+
+DEFAULT_MODEL = MODEL_ALIASES["small"]
 
 MODEL_KEY = "MOP_EVALUATOR_MODEL"
 LEGACY_EVALUATOR_KEY = "MOP_EVALUATOR"
@@ -45,12 +57,16 @@ _LEGACY_ALIASES = {
 
 
 def resolve_model(model: str | None = None) -> str:
-    """Resolve the litellm model string from arg > env > legacy alias > default."""
-    if model:
-        return model
-    env_model = os.environ.get(MODEL_KEY)
-    if env_model:
-        return env_model
+    """Resolve the litellm model string.
+
+    Precedence: explicit arg > MOP_EVALUATOR_MODEL env > legacy MOP_EVALUATOR
+    alias > default (`small`). A `small`/`medium`/`large` tier name (from arg
+    or env) resolves through MOP's own alias map; any other string is treated
+    as a raw litellm ``provider/model`` and passes through unchanged.
+    """
+    raw = model or os.environ.get(MODEL_KEY)
+    if raw:
+        return MODEL_ALIASES.get(raw, raw)
     legacy = os.environ.get(LEGACY_EVALUATOR_KEY, "").strip().lower()
     if legacy:
         if legacy not in _LEGACY_ALIASES:

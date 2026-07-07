@@ -114,9 +114,15 @@ def test_returns_none_without_git_or_mop_anywhere(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_defaults_to_builtins_when_nothing_found(tmp_path):
+def test_resolve_empty_by_default_when_nothing_found(tmp_path):
+    """Built-ins are opt-in: with nothing found and no --builtins, resolve to []."""
     (tmp_path / ".git").mkdir()
-    resolved = resolve_rules(start=tmp_path)
+    assert resolve_rules(start=tmp_path) == []
+
+
+def test_resolve_includes_builtins_when_opted_in(tmp_path):
+    (tmp_path / ".git").mkdir()
+    resolved = resolve_rules(start=tmp_path, use_builtins=True)
     assert {r.name for r in resolved} == {r.name for r in load_builtin_rules()}
 
 
@@ -138,7 +144,7 @@ def test_resolve_local_override_replaces_builtin(tmp_path):
         tmp_path,
         [{"name": builtin_name, "detector": "llm", "guidance": "local override"}],
     )
-    resolved = resolve_rules(start=tmp_path)
+    resolved = resolve_rules(start=tmp_path, use_builtins=True)
     match = [r for r in resolved if r.name == builtin_name]
     assert len(match) == 1
     assert match[0].guidance == "local override"
@@ -153,7 +159,7 @@ def test_resolve_local_inactive_silences_builtin(tmp_path):
         tmp_path,
         [{"name": builtin_name, "detector": "llm", "guidance": "", "active": False}],
     )
-    resolved = resolve_rules(start=tmp_path)
+    resolved = resolve_rules(start=tmp_path, use_builtins=True)
     assert builtin_name not in {r.name for r in resolved}
 
 
@@ -184,6 +190,6 @@ def test_resolve_rejects_both_dir_and_file(tmp_path):
 def test_resolve_builtin_lints_appear_once(tmp_path):
     (tmp_path / ".git").mkdir()
     _write_mop_dir(tmp_path, [{"name": "x", "detector": "llm", "guidance": "g"}])
-    resolved = resolve_rules(start=tmp_path)
+    resolved = resolve_rules(start=tmp_path, use_builtins=True)
     lint_names = [r.name for r in resolved if r.source_file == "<builtin>"]
     assert len(lint_names) == len(set(lint_names))

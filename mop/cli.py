@@ -149,6 +149,8 @@ def _render(verdict: Verdict, rules: list[Rule], *, as_json: bool) -> int:
 
 
 def _run_check(args: argparse.Namespace, rules: list[Rule]) -> int:
+    if not rules:
+        print("no active rules — MOP enforced nothing", file=sys.stderr)
     if args.rule:
         rules = [r for r in rules if r.name == args.rule]
         if not rules:
@@ -182,9 +184,18 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    check_p = sub.add_parser("check", help="Evaluate text; exit 0/1/2/3.")
+    check_p = sub.add_parser(
+        "check",
+        help="Evaluate text; exit 0/1/2/3.",
+        description=(
+            "Evaluate text against local .mop/ rules. Built-ins are OFF by "
+            "default — pass --builtins to include the packaged rule set. With "
+            "no rules at all, MOP warns and accepts (enforces nothing)."
+        ),
+    )
     check_p.add_argument("text", nargs="?", help="Text to check (or use --file/stdin)")
     check_p.add_argument("--file", type=Path, help="Read the text from a file")
+    check_p.add_argument("--builtins", action="store_true", help="Include packaged built-in rules (default: off)")
     check_p.add_argument("--rules-dir", type=Path, help="Explicit rules dir (skips discovery)")
     check_p.add_argument("--rules-file", type=Path, help="Explicit rules file (skips discovery)")
     check_p.add_argument("--rule", help="Restrict evaluation to one named rule")
@@ -198,6 +209,7 @@ def _build_parser() -> argparse.ArgumentParser:
     check_p.add_argument("--json", action="store_true", dest="as_json")
 
     rules_p = sub.add_parser("rules", help="List or show rules.")
+    rules_p.add_argument("--builtins", action="store_true", help="Include packaged built-in rules (default: off)")
     rules_p.add_argument("--rules-dir", type=Path, help="Explicit rules dir (skips discovery)")
     rules_p.add_argument("--rules-file", type=Path, help="Explicit rules file (skips discovery)")
     rules_p.add_argument("--json", action="store_true", dest="as_json")
@@ -205,12 +217,14 @@ def _build_parser() -> argparse.ArgumentParser:
     rules_p.set_defaults(rules_command="list")
 
     list_p = rules_sub.add_parser("list", help="List all resolved rules.")
+    list_p.add_argument("--builtins", action="store_true", default=argparse.SUPPRESS)
     list_p.add_argument("--rules-dir", type=Path, default=argparse.SUPPRESS)
     list_p.add_argument("--rules-file", type=Path, default=argparse.SUPPRESS)
     list_p.add_argument("--json", action="store_true", dest="as_json",
                         default=argparse.SUPPRESS)
 
     show_p = rules_sub.add_parser("show", help="Show details of one rule.")
+    show_p.add_argument("--builtins", action="store_true", default=argparse.SUPPRESS)
     show_p.add_argument("--rules-dir", type=Path, default=argparse.SUPPRESS)
     show_p.add_argument("--rules-file", type=Path, default=argparse.SUPPRESS)
     show_p.add_argument("--json", action="store_true", dest="as_json",
@@ -281,10 +295,18 @@ def main(argv: list[str] | None = None) -> int:
         raise  # code 0 (e.g. --help) propagates normally
     try:
         if args.command == "rules":
-            rules = resolve_rules(rules_dir=args.rules_dir, rules_file=args.rules_file)
+            rules = resolve_rules(
+                rules_dir=args.rules_dir,
+                rules_file=args.rules_file,
+                use_builtins=getattr(args, "builtins", False),
+            )
             return _run_rules(args, rules)
         # check command
-        rules = resolve_rules(rules_dir=args.rules_dir, rules_file=args.rules_file)
+        rules = resolve_rules(
+            rules_dir=args.rules_dir,
+            rules_file=args.rules_file,
+            use_builtins=args.builtins,
+        )
         return _run_check(args, rules)
     except Exception as exc:
         print(f"mop: {exc}", file=sys.stderr)

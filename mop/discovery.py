@@ -50,17 +50,19 @@ def resolve_rules(
     rules_dir: Path | None = None,
     rules_file: Path | None = None,
     start: Path | None = None,
+    use_builtins: bool = False,
 ) -> list[Rule]:
-    """Resolve the active rule set: built-ins + (explicit | discovered) local layer.
+    """Resolve the active rule set: (opt-in built-ins) + local layer.
 
-    ``rules_dir``/``rules_file`` are mutually exclusive explicit overrides
-    that bypass discovery. The local layer is loaded with
-    ``include_inactive=True`` so ``active: false`` entries can silence
-    built-ins during the merge.
+    Built-ins are **opt-in** (``use_builtins=True``) — MOP imposes no
+    packaged rules unless asked. ``rules_dir``/``rules_file`` are mutually
+    exclusive explicit overrides that bypass discovery. The local layer is
+    loaded with ``include_inactive=True`` so ``active: false`` entries can
+    silence a built-in during the merge (when built-ins are enabled).
     """
     if rules_dir and rules_file:
         raise ValueError("Pass at most one of rules_dir / rules_file.")
-    base = load_builtin_rules()
+    base = load_builtin_rules() if use_builtins else []
     if rules_file:
         overlay = load_rules_file(rules_file, include_inactive=True)
     elif rules_dir:

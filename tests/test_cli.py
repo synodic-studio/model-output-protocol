@@ -110,7 +110,7 @@ def test_accepted_exit_and_json(repo, monkeypatch, capsys):
 
 def test_rewritten_exit_and_json(repo, monkeypatch, capsys):
     _patch_evaluator(monkeypatch, Rewritten(rewritten="better text"))
-    code = main(["check", "worse text", "--json"])
+    code = main(["check", "worse text", "--builtins", "--json"])
     assert code == EXIT_REWRITTEN
     payload = json.loads(capsys.readouterr().out)
     assert payload["verdict"] == "rewritten"
@@ -139,7 +139,7 @@ def test_rejected_json_resolves_guidance(repo, monkeypatch, capsys):
 
 def test_rejected_human_output_shows_guidance(repo, monkeypatch, capsys):
     _patch_evaluator(monkeypatch, Rejected(unresolved=["unspecified"]))
-    code = main(["check", "text"])
+    code = main(["check", "text", "--builtins"])
     assert code == EXIT_REJECTED
     out = capsys.readouterr().out
     assert "rejected" in out
@@ -156,7 +156,7 @@ def test_file_input(repo, monkeypatch, capsys, tmp_path):
     target.write_text("from a file")
     calls = []
     _patch_evaluator(monkeypatch, Accepted(), calls)
-    code = main(["check", "--file", str(target)])
+    code = main(["check", "--file", str(target), "--builtins"])
     assert code == EXIT_ACCEPTED
     assert calls[0]["text"] == "from a file"
 
@@ -195,8 +195,34 @@ def test_empty_input_errors(repo, monkeypatch, capsys):
 def test_justify_passes_justification(repo, monkeypatch):
     calls = []
     _patch_evaluator(monkeypatch, Accepted(), calls)
-    main(["check", "text", "--justify", "the user asked for raw logs"])
+    main(["check", "text", "--builtins", "--justify", "the user asked for raw logs"])
     assert calls[0]["justification"] == "the user asked for raw logs"
+
+
+def test_builtins_off_by_default_warns_and_accepts(repo, monkeypatch, capsys):
+    """No --builtins and no local .mop → warn to stderr, accept, exit 0."""
+    calls = []
+    _patch_evaluator(monkeypatch, Rejected(unresolved=["x"]), calls)
+    code = main(["check", "anything", "--json"])
+    assert code == EXIT_ACCEPTED
+    err = capsys.readouterr().err
+    assert "no active rules" in err
+    assert calls == []  # evaluator never called — nothing to enforce
+
+
+def test_builtins_flag_loads_packaged_rules(repo, monkeypatch, capsys):
+    code = main(["rules", "list", "--builtins", "--json"])
+    assert code == EXIT_ACCEPTED
+    payload = json.loads(capsys.readouterr().out)
+    names = {r["name"] for r in payload}
+    assert "no-fabricated-attribution" in names  # a packaged built-in
+
+
+def test_rules_list_empty_without_builtins(repo, monkeypatch, capsys):
+    code = main(["rules", "list", "--json"])
+    assert code == EXIT_ACCEPTED
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == []
 
 
 def test_rule_filter_restricts_rule_set(repo, monkeypatch):
@@ -250,7 +276,7 @@ def test_model_flag_reaches_builder(repo, monkeypatch):
 
 
 def test_rules_list_human(repo, capsys):
-    code = main(["rules", "list"])
+    code = main(["rules", "list", "--builtins"])
     assert code == EXIT_ACCEPTED
     out = capsys.readouterr().out
     assert "Rules" in out
@@ -261,7 +287,7 @@ def test_rules_list_human(repo, capsys):
 
 
 def test_rules_list_json(repo, capsys):
-    code = main(["rules", "--json", "list"])
+    code = main(["rules", "--json", "list", "--builtins"])
     assert code == EXIT_ACCEPTED
     payload = json.loads(capsys.readouterr().out)
     assert isinstance(payload, list)
@@ -271,7 +297,7 @@ def test_rules_list_json(repo, capsys):
 
 
 def test_rules_show_human(repo, capsys):
-    code = main(["rules", "show", "no-fabricated-attribution"])
+    code = main(["rules", "show", "no-fabricated-attribution", "--builtins"])
     assert code == EXIT_ACCEPTED
     out = capsys.readouterr().out
     assert "Name:" in out
@@ -280,7 +306,7 @@ def test_rules_show_human(repo, capsys):
 
 
 def test_rules_show_json(repo, capsys):
-    code = main(["rules", "--json", "show", "no-fabricated-attribution"])
+    code = main(["rules", "--json", "show", "no-fabricated-attribution", "--builtins"])
     assert code == EXIT_ACCEPTED
     payload = json.loads(capsys.readouterr().out)
     assert payload["name"] == "no-fabricated-attribution"
@@ -300,11 +326,11 @@ def test_rules_list_with_explicit_file(repo, capsys, tmp_path):
             {"rules": [{"name": "only-rule", "detector": "llm", "guidance": "g"}]}
         )
     )
-    code = main(["rules", "--rules-file", str(explicit)])
+    code = main(["rules", "--rules-file", str(explicit), "--builtins"])
     assert code == EXIT_ACCEPTED
     out = capsys.readouterr().out
     assert "only-rule" in out
-    assert "no-fabricated-attribution" in out  # builtins still present as base layer
+    assert "no-fabricated-attribution" in out  # builtins base layer when opted in
 
 
 def test_evaluator_exception_exits_error(repo, monkeypatch, capsys):
@@ -314,7 +340,7 @@ def test_evaluator_exception_exits_error(repo, monkeypatch, capsys):
     monkeypatch.setattr(
         "mop.cli.build_evaluator", lambda *, rules, model=None: boom
     )
-    code = main(["check", "text"])
+    code = main(["check", "text", "--builtins"])
     assert code == EXIT_ERROR
     assert "provider exploded" in capsys.readouterr().err
 
@@ -325,8 +351,8 @@ def test_evaluator_exception_exits_error(repo, monkeypatch, capsys):
 
 
 def test_bare_mop_rules_exits_0_and_shows_rule_and_guidance(repo, capsys):
-    """Bare `mop rules` must exit 0 and include a known rule name + guidance."""
-    code = main(["rules"])
+    """`mop rules --builtins` must exit 0 and include a known rule name + guidance."""
+    code = main(["rules", "--builtins"])
     assert code == EXIT_ACCEPTED
     out = capsys.readouterr().out
     assert "no-fabricated-attribution" in out
@@ -335,8 +361,8 @@ def test_bare_mop_rules_exits_0_and_shows_rule_and_guidance(repo, capsys):
 
 
 def test_bare_mop_rules_json(repo, capsys):
-    """Bare `mop rules --json` must work and emit valid JSON."""
-    code = main(["rules", "--json"])
+    """`mop rules --builtins --json` must work and emit valid JSON."""
+    code = main(["rules", "--builtins", "--json"])
     assert code == EXIT_ACCEPTED
     payload = json.loads(capsys.readouterr().out)
     assert isinstance(payload, list)
@@ -384,8 +410,8 @@ def test_unknown_subcommand_exits_error(repo, capsys):
 
 
 def test_rules_list_json_after_subcommand(repo, capsys):
-    """`mop rules list --json` must produce JSON and exit 0."""
-    code = main(["rules", "list", "--json"])
+    """`mop rules list --builtins --json` must produce JSON and exit 0."""
+    code = main(["rules", "list", "--builtins", "--json"])
     assert code == EXIT_ACCEPTED
     payload = json.loads(capsys.readouterr().out)
     assert isinstance(payload, list)
@@ -394,8 +420,8 @@ def test_rules_list_json_after_subcommand(repo, capsys):
 
 
 def test_rules_show_json_after_subcommand(repo, capsys):
-    """`mop rules show <name> --json` must produce JSON and exit 0."""
-    code = main(["rules", "show", "no-fabricated-attribution", "--json"])
+    """`mop rules show <name> --builtins --json` must produce JSON and exit 0."""
+    code = main(["rules", "show", "no-fabricated-attribution", "--builtins", "--json"])
     assert code == EXIT_ACCEPTED
     payload = json.loads(capsys.readouterr().out)
     assert payload["name"] == "no-fabricated-attribution"
