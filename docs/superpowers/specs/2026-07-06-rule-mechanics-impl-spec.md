@@ -127,12 +127,34 @@ touched. Not a blocker; the CLI is the deliverable.
   `active: false` still silences a builtin when `--builtins` is on;
   `mop check --help` shows both.
 
-## Suggested order & review
+## Status: SHIPPED on `develop` (2026-07-06)
 
-Build T1 → T2 → T3 → T4 → T5; T3 depends on T1/T2, T5 depends on T1.
-Each task ships as its own commit on `develop` with tests green, pushed as
-it lands (house cadence). After T5, run the whole-branch review before
-declaring v1.
+All tasks implemented, 208 tests green, pushed. Commits:
+
+- **T1** — detector flatten `{llm, regex, script}` — `51d497a`
+- **T2 + T3** — deterministic authority + derived best-effort-rewrite verdict
+  (`unresolved`) — `0e6f505`
+- **T4 + T5** — `small/medium/large` aliases + opt-in `--builtins` with
+  empty-warn — `bdfeae5`
+
+Verified offline end-to-end: a `regex` rule rejects (exit 2) with no LLM
+call, clean text accepts (exit 0), an empty repo warns to stderr + accepts.
+
+**Implementation notes / deltas from the plan as written:**
+
+- `register_builtin_lint` was **kept** (not retired). A `script` rule
+  dispatches: `parameters.command` → subprocess; else in-process registered
+  check by name. Avoids a process spawn in the hot path.
+- **v1 evaluator fidelity:** the derived verdict fully captures deterministic
+  residual after a rewrite (real "partial" states). A purely llm-side partial
+  (model fixes rule A but not rule B, both `llm`) is representable in the
+  types (`Rewritten.unresolved`) and derivation, and depends only on the
+  model returning `unresolved` alongside `rewritten` — no further code change.
+- **Scope held:** only the CLI/core path is deterministic-authoritative. The
+  MCP gate (`protocol.py`) still treats deterministic hits as advisory; the
+  shared type field rename (`unresolved`) is the only change there.
+- `medium`/`large` aliases are provisional; `small = deepseek/deepseek-v4-flash`
+  is the confirmed default and the one actually exercised.
 
 ## Known residual risk
 

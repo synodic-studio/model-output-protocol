@@ -109,16 +109,21 @@ Older rule files load fine.
    you saw. For `regex`/`script`: the patterns or the command are the
    only lever.
 
-## Local project rules (`.mop/`)
+## Local project rules (`.mop/`) and opt-in built-ins
 
-In addition to the packaged built-in rules (`mop/rules_builtin/`) and the
-repository `rules/` directory, MOP discovers a **project-local `.mop/`**
-directory by walking up from the current working directory, stopping at
-the first ancestor containing `.git` (the repo root). If found, `.mop/`
-acts as a third layer merged over the built-ins — same YAML schema,
-same merge semantics.
+Composition is two flat layers: **optional built-ins** as a base, with a
+**project-local `.mop/`** layer on top. MOP discovers `.mop/` by walking up
+from the current working directory to the first ancestor containing `.git`
+(the repo root).
 
-Merge rules (see `mop.rules.merge_rules`):
+**Built-ins are opt-in.** `mop check` / `mop rules` run only your local
+`.mop/` rules unless you pass `--builtins`, which loads the packaged set
+(`mop/rules_builtin/`) as the base. MOP imposes no packaged rules by
+default. With no rules at all (no `--builtins`, no `.mop/`), MOP warns
+`no active rules — MOP enforced nothing` to stderr and accepts (exit 0).
+
+Merge rules (see `mop.rules.merge_rules`), applied only when `--builtins`
+is on:
 
 | Scenario | Result |
 |---|---|
@@ -130,13 +135,14 @@ Merge rules (see `mop.rules.merge_rules`):
 `mop check` or `mop rules` to skip walk-up discovery entirely and use an
 explicit rules source.
 
-**Active built-ins by default** (shipped in `mop/rules_builtin/`):
+**Curated-active built-ins** (shipped in `mop/rules_builtin/`, take effect
+with `--builtins`):
 
 | Rule | Detector | Active |
 |---|---|---|
 | `no-fabricated-attribution` | llm | yes |
 | `links-for-references` | llm | yes |
-| `format-score-too-high` | deterministic (lint) | yes (always active) |
+| `format-score-too-high` | script (bundled) | yes (always active) |
 
 Rules with `active: false` in the packaged files (e.g.
 `no-completed-without-findings-pings`, `acknowledgment-without-action`,

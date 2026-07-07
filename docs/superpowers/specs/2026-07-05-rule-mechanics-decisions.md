@@ -1,6 +1,8 @@
 # MOP rule mechanics — decisions & status (2026-07-05, simplified 2026-07-06)
 
-Status: **design settled, ready to build.** Captures a grilling session that
+Status: **IMPLEMENTED on `develop` (2026-07-06).** See
+`2026-07-06-rule-mechanics-impl-spec.md` for the shipped task breakdown and
+commit refs. Captures a grilling session that
 refined the composition model from `docs/patchbay/research-composition-model.md`
 and settled the evaluation flow. A second pass on 2026-07-06 deliberately
 *cut scope* to ship sooner (see "Scope cut" below). Extends the CLI/core work
