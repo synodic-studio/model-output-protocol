@@ -1,5 +1,8 @@
 # MOP Architecture
 
+> Decisions and their rationale are recorded as ADRs in [`adr/`](adr/). The
+> longer design/grilling narratives live in [`superpowers/specs/`](superpowers/specs/).
+
 ## System position
 
 MOP makes itself the *only* path to the user: the agent has no other way to reach the human.
