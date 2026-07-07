@@ -65,6 +65,49 @@ async def test_returns_rejected_with_unresolved():
 
 
 @pytest.mark.asyncio
+async def test_retries_without_response_format_when_provider_rejects_it():
+    """A provider that rejects response_format (e.g. DeepSeek) is retried once
+    without it — the prompt already asks for JSON."""
+    good = _fake_completion({"rewritten": None, "unresolved": []})
+    call_kwargs = []
+
+    async def flaky_acompletion(*args, **kwargs):
+        call_kwargs.append(kwargs)
+        if "response_format" in kwargs:
+            raise RuntimeError(
+                "DeepseekException - This response_format type is unavailable now"
+            )
+        return await good(*args, **kwargs)
+
+    with patch("litellm.acompletion", flaky_acompletion), patch(
+        "litellm.supports_response_schema", return_value=False
+    ):
+        evaluator = build_litellm_evaluator(rules=[], model="deepseek/deepseek-v4-flash")
+        v = await evaluator("hello", [], None)
+    assert isinstance(v, Accepted)
+    assert len(call_kwargs) == 2  # first with response_format, retry without
+    assert "response_format" not in call_kwargs[1]
+
+
+@pytest.mark.asyncio
+async def test_non_response_format_error_is_not_retried():
+    """An unrelated error (e.g. auth) propagates without a silent retry."""
+    calls = []
+
+    async def boom(*args, **kwargs):
+        calls.append(kwargs)
+        raise RuntimeError("AuthenticationError: bad key")
+
+    with patch("litellm.acompletion", boom), patch(
+        "litellm.supports_response_schema", return_value=False
+    ):
+        evaluator = build_litellm_evaluator(rules=[], model="deepseek/deepseek-chat")
+        with pytest.raises(RuntimeError, match="AuthenticationError"):
+            await evaluator("hello", [], None)
+    assert len(calls) == 1  # no retry on unrelated errors
+
+
+@pytest.mark.asyncio
 async def test_strips_markdown_fences_from_response():
     message = MagicMock()
     message.content = '```json\n{"action": "accept"}\n```'

@@ -153,6 +153,11 @@ def build_litellm_evaluator(
     ) -> Verdict:
         import litellm
 
+        # We handle provider errors ourselves (retry-without-response_format
+        # below); silence litellm's "Give Feedback / Get Help" banner so a
+        # caught-and-recovered error doesn't look like a failure.
+        litellm.suppress_debug_info = True
+
         query = _build_query(rules, text, deterministic_violations, justification)
         kwargs: dict = {}
         if api_key:
@@ -164,11 +169,23 @@ def build_litellm_evaluator(
         kwargs["response_format"] = (
             EvalLLMResponse if schema_ok else {"type": "json_object"}
         )
-        response = await litellm.acompletion(
-            model=model_id,
-            messages=[{"role": "user", "content": query}],
-            **kwargs,
-        )
+        messages = [{"role": "user", "content": query}]
+        try:
+            response = await litellm.acompletion(
+                model=model_id, messages=messages, **kwargs
+            )
+        except Exception as exc:
+            # Some providers/models reject a response_format they don't
+            # support (e.g. DeepSeek: "This response_format type is
+            # unavailable now"). The prompt already asks for raw JSON and we
+            # parse it defensively below, so drop the hint and retry once
+            # rather than failing the whole gate.
+            if "response_format" not in str(exc).lower():
+                raise
+            kwargs.pop("response_format", None)
+            response = await litellm.acompletion(
+                model=model_id, messages=messages, **kwargs
+            )
         content = response.choices[0].message.content or ""
         try:
             parsed = EvalLLMResponse.model_validate_json(_strip_fences(content))
