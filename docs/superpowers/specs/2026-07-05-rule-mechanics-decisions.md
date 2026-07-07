@@ -3,7 +3,8 @@
 Status: **IMPLEMENTED on `develop` (2026-07-06).** See
 `2026-07-06-rule-mechanics-impl-spec.md` for the shipped task breakdown and
 commit refs. Captures a grilling session that
-refined the composition model from `docs/patchbay/research-composition-model.md`
+refined the composition model (from earlier Vale-style research, since removed
+as superseded — the decisions here and in `docs/adr/` are the record)
 and settled the evaluation flow. A second pass on 2026-07-06 deliberately
 *cut scope* to ship sooner (see "Scope cut" below). Extends the CLI/core work
 in `2026-07-03-mop-cli-core-design.md`. This is the durable decisions record;
