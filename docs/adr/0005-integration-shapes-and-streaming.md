@@ -60,6 +60,15 @@ build.
   (Claude Code built on `claude_agent_sdk`), not for hosts that already own
   their delivery loop — those use a plain in-process filter at their transform
   seam, which is simpler than the `submit_message` protocol.
+- Until such a host exists, the MCP gate is **parked/frozen** (decision:
+  `docs/mop-enforce-decision.md`, Issue 2 / option 2A). It predates the ADR-0002
+  engine and is not deterministic-authoritative, so the enforce contract (ADR-0002
+  delivery-layer guarantee) does **not** hold there. Reviving it means rebuilding
+  `submit_message`/`submit_justification` as a thin state wrapper (justification
+  loop + failed-open) around `cli.check()` — not patching the old verdict path —
+  so the 1A contract is implemented and tested in exactly one engine. This is why
+  the README calls it parked and this ADR calls it Agent-SDK-positioned: both are
+  the same status.
 - MOP needs no per-host code: hosts inject `deliver` + evaluator (Shape 1) or
   call the CLI (Shape 2). The four surveyed hosts required **zero** changes to
   MOP itself.

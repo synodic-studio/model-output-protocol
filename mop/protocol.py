@@ -12,6 +12,18 @@ them via @tool decorators.
 
 State transitions are centralized in `apply()` so submit_message and
 submit_justification stay consistent.
+
+Status — PARKED / experimental (ADR-0005; docs/mop-enforce-decision.md Issue 2 /
+option 2A). This gate predates the ADR-0002 two-phase engine and is NOT
+deterministic-authoritative: `submit_message` feeds only lint-tagged hints
+(`collect_lint_hints`) to the evaluator and lets its verdict stand with no
+deterministic re-check, so the 1A delivery guarantee in `host.py`/`cli.py` does
+NOT hold here. No live integration uses it; it is positioned for a future
+Agent-SDK host (Claude Code on `claude_agent_sdk`). Do not patch new semantics
+into this path piecemeal — when a real Agent-SDK host arrives, rebuild
+`submit_message`/`submit_justification` as a thin state wrapper (justification
+loop + failed-open) around `cli.check()`, so one engine owns verdict semantics.
+The justification-loop design here is worth preserving; the verdict logic is not.
 """
 
 from __future__ import annotations

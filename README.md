@@ -15,7 +15,7 @@ Stuffing more rules in the system prompt does not fix this — the agent's conte
 MOP is one core (`mop.rules`, `mop.evaluators`, `mop.types`) with two ways to call it:
 
 1. **`mop check` — a stateless CLI** (the primary, shipped path). Pipe a message in, get a verdict and exit code out. No agent runtime, no MCP server. This is how a host gates outbound text.
-2. **In-process MCP gate** (`mop/protocol.py`, `mop/mcp.py`) — a stateful adapter exposing `submit_message` / `submit_justification` as MCP tools, with a justification loop and failed-open. Still present; treated as the legacy path while integrations standardize on the CLI.
+2. **In-process MCP gate** (`mop/protocol.py`, `mop/mcp.py`) — a stateful adapter exposing `submit_message` / `submit_justification` as MCP tools, with a justification loop and failed-open. **Parked pending an Agent-SDK host** (e.g. Claude Code on `claude_agent_sdk`): it is not deterministic-authoritative and no live integration uses it. When one arrives it will be rebuilt as a thin state wrapper around `mop check`, so verdict semantics live in one engine. See ADR-0005 and `docs/mop-enforce-decision.md` (Issue 2).
 
 ## How evaluation works
 
