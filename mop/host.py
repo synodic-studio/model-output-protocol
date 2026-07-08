@@ -33,7 +33,7 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
-from .cli import _deterministic_hits, check
+from .cli import _DETERMINISTIC, _deterministic_hits, check
 from .discovery import resolve_rules
 from .types import Accepted, Evaluator, Rejected, Rewritten, Verdict
 
@@ -136,7 +136,7 @@ def _delivery(text: str, verdict: Verdict, rules, *, mode: str) -> tuple[str, bo
     if mode == "log":
         return text, False
     if isinstance(verdict, Rewritten):
-        det_names = {r.name for r in rules if r.detector != "llm"}
+        det_names = {r.name for r in rules if r.detector in _DETERMINISTIC}
         if det_names & set(verdict.unresolved):
             return REDACTION_NOTICE, True
         return verdict.rewritten, verdict.rewritten.strip() != text.strip()
