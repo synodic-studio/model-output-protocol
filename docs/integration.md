@@ -75,6 +75,12 @@ It exposes exactly the seam MOP needs.
 
 ## B. patchbay-relay — historical reference, currently removed (Shape 1)
 
+> **Shipped (wiring):** [`integrations/patchbay/`](../integrations/patchbay/)
+> documents the one-call reactivation — `mop.host.filter_text(response,
+> host="patchbay-relay")` in `_send_response`, log mode. Gates whatever harness
+> patchbay dispatches (Pi, codex, …) at the delivery boundary.
+
+
 MOP was **fully integrated here once and then removed** — the Claude-SDK and
 `cc-sdk-mop` harnesses were deleted in commit `906b0c8` when the bridge went
 `pi`-only, and the README now marks it "alpha, no longer actively developed."
@@ -99,6 +105,12 @@ revived.
 ---
 
 ## C. Pi (pi-mono) — TypeScript, no output-rewrite hook (Shape 2)
+
+> **Shipped:** a Pi extension at [`integrations/pi/mop.ts`](../integrations/pi/mop.ts)
+> gates on `message_end` and shells to `mop check --host pi`. Log mode
+> (observe-only) is verified end-to-end against real `pi -p`; enforce mode
+> (in-place mutation) is opt-in and marked fragile. Gates Pi wherever it runs.
+
 
 Pi is TypeScript/Node end-to-end. Its extension system
 (`packages/coding-agent/docs/extensions.md`) gates **inputs and tool traffic**

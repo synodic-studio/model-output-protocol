@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from mop import gate
+from mop import filter_text, gate, gate_from_env
 from mop.host import REDACTION_NOTICE
 from mop.types import Rejected
 
@@ -119,3 +119,36 @@ def test_gate_callable_from_running_loop(rules_dir: Path) -> None:
         ).deliver
 
     assert asyncio.run(driver()) == REDACTION_NOTICE
+
+
+# ---------------------------------------------------------------------------
+# gate_from_env / filter_text — the env-driven surface the host shims use.
+# ---------------------------------------------------------------------------
+
+
+def test_gate_from_env_reads_env(rules_dir: Path, tmp_path: Path, monkeypatch) -> None:
+    audit = tmp_path / "audit"
+    monkeypatch.setenv("MOP_MODE", "log")
+    monkeypatch.setenv("MOP_RULES_DIR", str(rules_dir))
+    monkeypatch.setenv("MOP_AUDIT_LOG", str(audit))
+    result = gate_from_env("LGTM ship it", host="hermes")
+    assert result.mode == "log"
+    assert result.deliver == "LGTM ship it"  # log = passthrough
+    assert result.verdict.__class__.__name__ == "Rejected"  # still evaluated
+    entry = json.loads(next(audit.glob("*.jsonl")).read_text().strip())
+    assert entry["host"] == "hermes"
+
+
+def test_filter_text_passthrough_in_log_mode(rules_dir: Path, monkeypatch) -> None:
+    monkeypatch.setenv("MOP_MODE", "log")
+    monkeypatch.setenv("MOP_RULES_DIR", str(rules_dir))
+    monkeypatch.delenv("MOP_AUDIT_LOG", raising=False)
+    assert filter_text("LGTM ship it", host="patchbay-relay") == "LGTM ship it"
+
+
+def test_filter_text_fail_open(monkeypatch) -> None:
+    # A malformed rules dir must not withhold text — filter_text returns original.
+    monkeypatch.setenv("MOP_MODE", "log")
+    monkeypatch.setenv("MOP_RULES_DIR", "/nonexistent/rules/dir/xyz")
+    monkeypatch.delenv("MOP_AUDIT_LOG", raising=False)
+    assert filter_text("hello world", host="patchbay-relay") == "hello world"

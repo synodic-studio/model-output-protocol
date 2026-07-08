@@ -28,6 +28,7 @@ active; with no active rules it never touches litellm or an event loop.
 from __future__ import annotations
 
 import asyncio
+import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -175,3 +176,39 @@ def gate(
         )
     deliver, changed = _delivery(text, verdict, mode=mode)
     return GateResult(deliver=deliver, verdict=verdict, changed=changed, mode=mode)
+
+
+def gate_from_env(text: str, *, host: str) -> GateResult:
+    """`gate()` with config read from the standard MOP_* env vars.
+
+    The one env surface every in-process host shim uses (Hermes plugin,
+    patchbay filter):
+
+        MOP_MODE=log|enforce      default log
+        MOP_RULES_DIR=<dir>       a .mop-style rules dir (unset = no local rules)
+        MOP_AUDIT_LOG=<dir>       JSONL flight recorder (unset = no audit)
+        MOP_BUILTINS=1            opt in to packaged built-in rules
+        MOP_EVALUATOR_MODEL=<m>   litellm model/tier (only used once llm rules active)
+    """
+    return gate(
+        text,
+        host=host,
+        mode=os.environ.get("MOP_MODE", "log"),
+        rules_dir=os.environ.get("MOP_RULES_DIR") or None,
+        use_builtins=os.environ.get("MOP_BUILTINS", "") not in ("", "0", "false"),
+        model=os.environ.get("MOP_EVALUATOR_MODEL") or None,
+        audit_dir=os.environ.get("MOP_AUDIT_LOG") or None,
+    )
+
+
+def filter_text(text: str, *, host: str) -> str:
+    """Text-in / text-out filter for send-path hosts (e.g. patchbay `_send_response`).
+
+    Returns the string to deliver: the original in log mode, the rewrite or a
+    redaction notice in enforce mode. Config from the MOP_* env vars. Fail-open —
+    on any error the original text is returned unchanged, never withheld.
+    """
+    try:
+        return gate_from_env(text, host=host).deliver
+    except Exception:
+        return text

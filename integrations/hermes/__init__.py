@@ -33,39 +33,20 @@ if str(_MOP_REPO) not in sys.path:
     sys.path.insert(0, str(_MOP_REPO))
 
 
-def _env_config() -> dict:
-    return {
-        "mode": os.environ.get("MOP_MODE", "log"),
-        "rules_dir": os.environ.get("MOP_RULES_DIR") or None,
-        "audit_dir": os.environ.get("MOP_AUDIT_LOG") or None,
-        "use_builtins": os.environ.get("MOP_BUILTINS", "") not in ("", "0", "false"),
-        "model": os.environ.get("MOP_EVALUATOR_MODEL") or None,
-    }
-
-
 def register(ctx) -> None:
     """Hermes plugin entrypoint. Wire MOP's gate to transform_llm_output."""
-    from mop import gate  # imported here so a bad import fails just this plugin
+    from mop import gate_from_env  # imported here so a bad import fails just this plugin
 
     def transform_llm_output(*, response_text: str = "", **kwargs) -> str | None:
         """Sync hook: evaluate + audit; return a replacement or None (passthrough)."""
         if not response_text:
             return None
-        cfg = _env_config()
         try:
-            result = gate(
-                response_text,
-                host="hermes",
-                mode=cfg["mode"],
-                rules_dir=cfg["rules_dir"],
-                use_builtins=cfg["use_builtins"],
-                model=cfg["model"],
-                audit_dir=cfg["audit_dir"],
-            )
+            result = gate_from_env(response_text, host="hermes")
         except Exception as exc:  # fail-open: never withhold on our own bug
             logger.warning("MOP gate failed, passing message through: %s", exc)
             return None
         return result.replacement()
 
     ctx.register_hook("transform_llm_output", transform_llm_output)
-    logger.info("MOP plugin registered (mode=%s)", _env_config()["mode"])
+    logger.info("MOP plugin registered (mode=%s)", os.environ.get("MOP_MODE", "log"))

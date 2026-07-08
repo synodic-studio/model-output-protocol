@@ -153,13 +153,19 @@ def _render(verdict: Verdict, rules: list[Rule], *, as_json: bool) -> int:
 
 
 def _maybe_audit(
-    text: str, verdict: Verdict, rules: list[Rule], justification: str | None
+    text: str,
+    verdict: Verdict,
+    rules: list[Rule],
+    justification: str | None,
+    host: str | None = None,
 ) -> None:
     """If MOP_AUDIT_LOG is set, append this verdict to the JSONL flight recorder.
 
     Observability for the stateless CLI: real `mop check` traffic lands in the
     same daily-rotated `<dir>/YYYY-MM-DD.jsonl` the MCP gate uses, so verdicts
-    can be reviewed for performance and mined into new evals later.
+    can be reviewed for performance and mined into new evals later. ``host``
+    tags the record with the calling surface (e.g. a `pi` extension) so layered
+    gates stay attributable — see docs/integration.md.
     """
     log_dir = os.environ.get("MOP_AUDIT_LOG")
     if not log_dir:
@@ -172,6 +178,7 @@ def _maybe_audit(
         rule_names=[r.name for r in rules],
         attempt=0,
         justification=justification,
+        host=host,
     )
 
 
@@ -193,7 +200,7 @@ def _run_check(args: argparse.Namespace, rules: list[Rule]) -> int:
             allow_rewrite=not args.no_rewrite,
         )
     )
-    _maybe_audit(text, verdict, rules, args.justify)
+    _maybe_audit(text, verdict, rules, args.justify, getattr(args, "host", None))
     return _render(verdict, rules, as_json=args.as_json)
 
 
@@ -230,6 +237,10 @@ def _build_parser() -> argparse.ArgumentParser:
     check_p.add_argument("--rule", help="Restrict evaluation to one named rule")
     check_p.add_argument("--model", help="litellm model string (default: MOP_EVALUATOR_MODEL)")
     check_p.add_argument("--justify", metavar="REASON", help="Attach a justification")
+    check_p.add_argument(
+        "--host",
+        help="Tag the audit record with the calling host (e.g. 'pi', 'patchbay-relay')",
+    )
     check_p.add_argument(
         "--no-rewrite",
         action="store_true",

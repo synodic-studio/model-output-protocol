@@ -12,7 +12,7 @@ from .discovery import find_local_rules_dir, load_builtin_rules, resolve_rules
 from .evaluators import build_evaluator, build_litellm_evaluator
 from .format_score import format_score
 from .hooks import protocol_prompt, stop
-from .host import GateResult, gate
+from .host import GateResult, filter_text, gate, gate_from_env
 from .mcp import build_mcp_server, build_tool_handlers
 from .protocol import MOP
 from .rules import (
@@ -67,6 +67,8 @@ __all__ = [
     "protocol_prompt",
     "stop",
     "gate",
+    "gate_from_env",
+    "filter_text",
     "GateResult",
     "Auditor",
     "JsonlAuditor",

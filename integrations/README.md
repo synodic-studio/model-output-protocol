@@ -6,11 +6,15 @@ thin — the real work lives in [`mop/host.py`](../mop/host.py) (`gate()`), so
 every host shares one evaluation + audit path. Design rationale and per-host
 chokepoints are in [`docs/integration.md`](../docs/integration.md).
 
-**One gate per delivery path.** A relay that runs another agent as a subprocess
-(patchbay-relay runs Pi) must gate at the *outermost* boundary only. Installing
-a MOP gate in both the relay and the inner agent double-evaluates and
-double-logs the same message. Every audit record carries a `host` tag so
-double-counting is at least detectable, but the rule is: pick one layer.
+**One _enforcing_ gate per delivery path.** These shims cover different axes:
+the Pi extension gates Pi wherever Pi runs (standalone or inside any relay); a
+relay filter gates whatever harness the relay dispatches (Pi, codex, …) at the
+delivery boundary. They overlap only for Pi-inside-a-relay. Double **logging**
+there is harmless — each record carries a `host` tag, so you just see the same
+message from two surfaces. The thing to avoid is two **enforcing** gates on one
+path: that stacks two rewrites / a redact-then-rewrite on the same message. So
+the rule is precise — at most one gate in `enforce` mode per path; any number
+may run in `log` mode.
 
 ## Gears: log vs. enforce
 
@@ -45,8 +49,30 @@ ln -s "$PWD/integrations/hermes" ~/.hermes/plugins/mop
 Registers the `transform_llm_output` hook (`agent/turn_finalizer.py`). Fail-open:
 any error passes the message through unchanged.
 
+## pi/
+
+`mop.ts` — a Pi extension (TypeScript). Pi has no output-rewrite hook, so this
+gates on `message_end` and shells out to the `mop` CLI. Load it per invocation
+or install it globally:
+
+```bash
+pi -p -e "$PWD/integrations/pi/mop.ts" "<prompt>"      # one-off
+ln -s "$PWD/integrations/pi/mop.ts" ~/.pi/agent/extensions/mop.ts   # global
+```
+
+Log mode (default) is observe-only — it reads the final assistant text, calls
+`mop check --host pi` to evaluate + audit, and does not touch the message.
+Enforce mode mutates the final message in place; that leans on Pi-internal
+by-reference behavior (verified for `pi -p` and the `agent_end` payload relays
+read), so it's opt-in and should be re-verified per Pi version. Gates Pi
+*wherever it runs*, including inside a relay — so if you enforce here, don't also
+enforce at the relay for the Pi path.
+
 ## patchbay/
 
-(Reserved — the patchbay-relay filter shim. Gate at `_send_response`
-[`patchbay/telegram_send.py`], logging passthrough. Because patchbay runs Pi,
-this is the single gate for the Pi delivery path; do not also gate inside Pi.)
+Wiring for the patchbay-relay send path (Python, in-process). MOP owns the
+interface — `mop.host.filter_text(response, host="patchbay-relay")` — so
+patchbay's edit is a single call added alongside its existing `_send_response`
+filters (`patchbay/telegram_send.py`). See `patchbay/README.md` here for the
+exact snippet and the reactivation config. Gates whatever harness patchbay
+dispatches (Pi, codex, …) at the delivery boundary.
