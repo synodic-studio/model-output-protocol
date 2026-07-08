@@ -10,7 +10,7 @@ import pytest
 
 from mop import filter_text, gate, gate_from_env
 from mop.host import REDACTION_NOTICE
-from mop.types import Rejected
+from mop.types import Rejected, Rewritten
 
 
 async def _reject_evaluator(text, hints, justification):
@@ -94,6 +94,50 @@ def test_enforce_mode_redacts_rejection(rules_dir: Path) -> None:
     assert result.deliver == REDACTION_NOTICE
     assert result.changed is True
     assert result.replacement() == REDACTION_NOTICE
+
+
+# ---------------------------------------------------------------------------
+# Enforce contract (1A): a rewrite that still trips a DETERMINISTIC rule is
+# never delivered — it is redacted. A rewrite whose only residual is a judged
+# (llm) rule is best-effort and delivers.
+# ---------------------------------------------------------------------------
+
+
+def test_enforce_redacts_deterministic_residual(rules_dir: Path) -> None:
+    # Evaluator "fixes" cosmetically but leaves the banned token in. cli.py
+    # re-checks and folds "no-lgtm" into unresolved; 1A must redact, not ship.
+    async def _leaky_rewrite(text, hints, justification):
+        return Rewritten(rewritten=text + " (edited)", unresolved=[])
+
+    result = gate(
+        "LGTM ship it",
+        host="relay",
+        mode="enforce",
+        rules_dir=rules_dir,
+        evaluator=_leaky_rewrite,
+    )
+    assert result.verdict.__class__.__name__ == "Rewritten"
+    assert "no-lgtm" in result.verdict.unresolved
+    assert result.deliver == REDACTION_NOTICE  # deterministic residual → blocked
+    assert result.changed is True
+
+
+def test_enforce_delivers_judged_residual(rules_dir: Path) -> None:
+    # Deterministic rule is genuinely cleared; only a judged (non-deterministic)
+    # residual remains. Best-effort: deliver the rewrite, do not redact.
+    async def _clean_rewrite(text, hints, justification):
+        return Rewritten(rewritten="ship it", unresolved=["some-judged-rule"])
+
+    result = gate(
+        "LGTM ship it",
+        host="relay",
+        mode="enforce",
+        rules_dir=rules_dir,
+        evaluator=_clean_rewrite,
+    )
+    assert result.verdict.__class__.__name__ == "Rewritten"
+    assert result.deliver == "ship it"  # judged residual delivers
+    assert result.changed is True
 
 
 def test_bad_mode_raises(rules_dir: Path) -> None:

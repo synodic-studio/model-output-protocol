@@ -52,3 +52,12 @@ up to you"). `--no-rewrite` runs judgement but never applies a rewrite
 - A purely LLM-side partial (model fixes rule A but not rule B, both `llm`) is
   representable (`Rewritten.unresolved`) and needs no further code — it depends
   only on the model returning `unresolved` alongside `rewritten`.
+- **Delivery-layer guarantee (enforce mode).** Deterministic authority holds not
+  just at the verdict layer but where it matters — at delivery. In
+  `mode="enforce"`, `mop.host.gate` never delivers text on which an active
+  deterministic rule still fires: a *partial* `Rewritten` whose `unresolved`
+  names a `regex`/`script`/`length` rule is **redacted**, not sent (`host.py::
+  _delivery`). Judged (`llm`) residuals are best-effort and deliver. So the
+  "rewritten (partial)" verdict-table row above can still redact at the gate when
+  its residual is deterministic. (Decision: `docs/mop-enforce-decision.md`,
+  Issue 1 / option 1A. Log mode is unaffected — it always passes through.)

@@ -123,11 +123,22 @@ async def _unused_evaluator(text, hints, justification):  # pragma: no cover
     raise AssertionError("evaluator called unexpectedly")
 
 
-def _delivery(text: str, verdict: Verdict, *, mode: str) -> tuple[str, bool]:
-    """Map a verdict to (text_to_deliver, changed) under the active mode."""
+def _delivery(text: str, verdict: Verdict, rules, *, mode: str) -> tuple[str, bool]:
+    """Map a verdict to (text_to_deliver, changed) under the active mode.
+
+    Enforce contract (ADR-0002; docs/mop-enforce-decision.md, Issue 1 / 1A):
+    MOP never delivers text on which an active *deterministic* rule still fires.
+    ``cli.py`` re-checks the deterministic rules against the rewrite and folds
+    any still-firing names into ``Rewritten.unresolved``; so a partial rewrite
+    whose ``unresolved`` names a regex/script/length rule is redacted, not
+    delivered. ``llm``-rule residuals are judged, best-effort, and deliver.
+    """
     if mode == "log":
         return text, False
     if isinstance(verdict, Rewritten):
+        det_names = {r.name for r in rules if r.detector != "llm"}
+        if det_names & set(verdict.unresolved):
+            return REDACTION_NOTICE, True
         return verdict.rewritten, verdict.rewritten.strip() != text.strip()
     if isinstance(verdict, Rejected):
         return REDACTION_NOTICE, True
@@ -174,7 +185,7 @@ def gate(
             attempt=0,
             host=host,
         )
-    deliver, changed = _delivery(text, verdict, mode=mode)
+    deliver, changed = _delivery(text, verdict, rules, mode=mode)
     return GateResult(deliver=deliver, verdict=verdict, changed=changed, mode=mode)
 
 
