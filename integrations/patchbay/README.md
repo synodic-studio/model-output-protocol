@@ -5,21 +5,24 @@ patchbay-relay is Python and finalizes every outgoing reply as a string in
 (`_is_silence_narration`, `_is_noisy_status`). MOP slots in as a third filter.
 MOP owns the logic; patchbay's edit is one call.
 
-## Wiring (in `patchbay/telegram_send.py`, near the top of `_send_response`)
+## Wiring (in `patchbay/telegram_send.py`, in `_send_response`)
 
-After the file-sentinel extraction and before the existing filters:
+Place the call **after** the silence/noisy-status drop filters and **before**
+the MarkdownV2 conversion / chunking, so MOP only sees what is actually
+delivered (the audit means "what the user got", not "what the agent emitted"):
 
 ```python
-from mop.host import filter_text  # top-of-file import
-
-# ... inside _send_response(bot, chat_id, thread_id, response), after sentinels:
-response = filter_text(response, host="patchbay-relay")
+if response:
+    try:
+        from mop.host import filter_text
+        response = filter_text(response, host="patchbay-relay")
+    except Exception as _mop_err:
+        bridge.logger.warning("MOP gate failed, passing response through: %s", _mop_err)
 ```
 
 `filter_text` returns the string to send: the original in log mode, a rewrite or
 redaction notice in enforce mode. It reads the MOP_* env vars and is fail-open —
-on any error it returns the original text, never withholds it. Gate the whole
-`response` here, before the `TELEGRAM_MSG_LIMIT` chunking.
+on any error it returns the original text, never withholds it.
 
 ## Reactivation config (log mode — passthrough)
 

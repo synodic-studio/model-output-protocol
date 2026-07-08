@@ -18,6 +18,12 @@
  *     but it is Pi-internal behavior that could change across versions. Keep it
  *     opt-in and re-verify before trusting it as a hard gate.
  *
+ * Performance note: the `mop` CLI is invoked with a synchronous
+ * `execFileSync`, so each turn blocks Pi until it returns. Negligible with no
+ * active rules (Python startup, no LLM call); once an `llm` rule is active each
+ * turn blocks on an evaluator call — fine for headless `pi -p` one-shots, but
+ * it would stall an interactive session. Enable rules accordingly.
+ *
  * Config (env, same surface as the Hermes plugin):
  *   MOP_MODE=log|enforce      default log
  *   MOP_CMD=<path>            mop CLI (default: <repo>/.venv/bin/mop, else `mop`)
