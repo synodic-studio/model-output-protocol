@@ -27,14 +27,28 @@ user?**
 The cross-cutting constraint is **streaming** — see the bottom of this doc and
 [ADR 0005](adr/0005-integration-shapes-and-streaming.md).
 
+**One gate per delivery path.** A relay that runs another agent as a subprocess
+(patchbay-relay runs Pi as `pi -p --mode json`) sees that agent's final output
+as a string it can gate. Installing a MOP gate in *both* the relay and the inner
+agent double-evaluates and double-logs the same message. Gate at the **outermost
+boundary only**. Every audit record carries a `host` tag so double-counting is at
+least detectable, but the rule is: pick one layer per path.
+
 ---
 
-## A. Hermes — do this first (Shape 1, zero core edits)
+## A. Hermes — SHIPPED (log mode), Shape 1, zero core edits
 
-**The highest-leverage integration.** Hermes (`~/.hermes/hermes-agent/`,
-Python, v0.16.0) is the live personal agent reachable over ~20 chat platforms —
-almost certainly the thing actually talked to from the iPad. It already exposes
-the exact seam MOP needs.
+**The highest-leverage integration, now live in log mode.** The plugin lives in
+this repo at [`integrations/hermes/`](../integrations/hermes/) and is symlinked
+into `~/.hermes/plugins/mop`; it registers `transform_llm_output` and calls
+[`mop.host.gate`](../mop/host.py) with `host="hermes"`. Enabled via
+`plugins.enabled: [mop]` in Hermes config; audit dir via `MOP_AUDIT_LOG` in
+`~/.hermes/.env`. Default `MOP_MODE=log` — every outgoing message is evaluated
+and recorded, delivery untouched. Flip to `enforce` only after rules are vetted.
+
+Hermes (`~/.hermes/hermes-agent/`, Python, v0.16.0) is the live personal agent
+reachable over ~20 chat platforms — the thing actually talked to from the iPad.
+It exposes exactly the seam MOP needs.
 
 - **Chokepoint:** the `transform_llm_output` plugin hook, fired at
   `agent/turn_finalizer.py:272` right before every surface (CLI, gateway, ACP)
