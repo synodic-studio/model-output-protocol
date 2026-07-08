@@ -20,7 +20,10 @@ import json
 from dataclasses import asdict
 from typing import Any, Awaitable, Callable
 
-from claude_agent_sdk import create_sdk_mcp_server, tool
+# NOTE: `claude_agent_sdk` is imported lazily inside build_mcp_server, not at
+# module top. Importing `mop` must NOT require the SDK — out-of-band hosts
+# (mop.host.gate, the CLI) have no SDK dependency, and forcing it here would
+# break `import mop` in any venv without claude_agent_sdk installed.
 
 from .protocol import MOP
 from .types import NoPendingMessageError, Verdict
@@ -75,6 +78,8 @@ def build_tool_handlers(
 
 def build_mcp_server(mop: MOP, *, name: str = "mop", version: str = "1.0.0"):
     """Return an McpSdkServerConfig for ClaudeAgentOptions.mcp_servers."""
+    from claude_agent_sdk import create_sdk_mcp_server, tool
+
     handlers = build_tool_handlers(mop)
 
     @tool(

@@ -12,6 +12,7 @@ from .discovery import find_local_rules_dir, load_builtin_rules, resolve_rules
 from .evaluators import build_evaluator, build_litellm_evaluator
 from .format_score import format_score
 from .hooks import protocol_prompt, stop
+from .host import GateResult, gate
 from .mcp import build_mcp_server, build_tool_handlers
 from .protocol import MOP
 from .rules import (
@@ -65,6 +66,8 @@ __all__ = [
     "check",
     "protocol_prompt",
     "stop",
+    "gate",
+    "GateResult",
     "Auditor",
     "JsonlAuditor",
     "Rule",
