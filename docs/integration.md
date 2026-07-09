@@ -184,6 +184,47 @@ compatibility" section of [architecture.md](architecture.md).
 
 ---
 
+## Deployment wiring — where audit logging is turned on
+
+The flight recorder only writes when `MOP_AUDIT_LOG` names a directory
+(`mop/host.py::gate`, guarded by `if audit_dir:`). A plugin can be installed and
+running and still record **nothing** if the var is unset — that is the default,
+and it is the trap to check first when "logging looks dead."
+
+Canonical audit dir on this machine: `/Users/bryancostanza/.mop/audit`
+(daily-rotated `YYYY-MM-DD.jsonl`, UTC-dated). Per-host wiring:
+
+- **Hermes** — `EnvironmentVariables` in
+  `~/Library/LaunchAgents/ai.hermes.gateway.plist` (`MOP_AUDIT_LOG`,
+  `MOP_MODE=log`). Launched Python directly, so plist env reaches the process.
+- **patchbay-relay** — `EnvironmentVariables` in
+  `~/Library/LaunchAgents/com.synodic.patchbay-relay.plist` (`MOP_AUDIT_LOG`;
+  runs `MOP_MODE=enforce`). Goes through `run.sh`, which inherits (does not
+  scrub) the plist env.
+- **Claude Code** — stock CC has no pre-delivery hook, so audit-only via a Stop
+  hook: `~/.claude/hooks/mop-audit-stop.py` (registered in `~/.claude/settings.json`).
+  It pulls the last assistant message's `text` blocks only (never `thinking`/
+  `tool_use`) and shells to `mop check --host claude-code`.
+- **Pi** — `mop.ts` shells to `mop check` reading `MOP_AUDIT_LOG`; interactive,
+  not a launchd service, so wire the var in Pi's own env when that surface is
+  activated.
+
+After editing a plist you must `launchctl bootout` + `bootstrap gui/$(id -u)` —
+a plain edit changes nothing. Verify the var reached the **running** process
+(`launchctl print gui/$(id -u)/<label> | grep MOP_`), not just the file.
+
+Done-criterion for "logging works": a real host-tagged line lands via the
+host's actual path. The single proving command:
+
+```
+cat ~/.mop/audit/*.jsonl | python3 -c "import sys,json,collections; \
+print(collections.Counter(json.loads(l)['host'] for l in sys.stdin if l.strip()))"
+```
+
+should show `hermes`, `patchbay-relay`, and `claude-code`.
+
+---
+
 ## Recommendation
 
 Do **Hermes first** — it's live, Python, and its `transform_llm_output` hook
