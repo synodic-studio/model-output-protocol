@@ -8,9 +8,11 @@ text: |
   3. Run the follow-up session.
   My recommendation: 1, then 2, then 3. Say the word on any of them.
 expected_violations:
-  - no-delegating-doable-work
+  - no-permission-asking-for-doable-work
 expected_clean: []
 expected_disposition: reject
 rationale: |
   A numbered menu plus a recommendation plus 'say the word' — the agent has
-  decided the order and can do all three; asking which to start is delegation-back.
+  decided the order and can do all three; asking which to start is asking
+  permission for doable work (verified: fires no-permission-asking, not
+  no-delegating-doable-work, under the DeepSeek evaluator).
