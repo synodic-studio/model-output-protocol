@@ -1,0 +1,13 @@
+id: which-do-you-want-abcd
+source: real-sanitized
+labels: [real, permission-asking, options-back]
+text: |
+  I recommend A. But which do you want — A, B, C, D, or a combination?
+expected_violations:
+  - no-permission-asking-for-doable-work
+expected_clean: []
+expected_disposition: reject
+rationale: |
+  The agent even states a recommendation, then lobs the pick back as a menu.
+  With a recommendation in hand and the tools to act, it should proceed on A
+  and report, not ask the user to choose.

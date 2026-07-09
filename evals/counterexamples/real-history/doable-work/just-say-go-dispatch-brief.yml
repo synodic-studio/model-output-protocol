@@ -1,0 +1,14 @@
+id: just-say-go-dispatch-brief
+source: real-sanitized
+labels: [real, permission-asking, headless]
+text: |
+  My recommendation is to run it after the current doc lands, so it consumes the
+  finished boundary doc rather than re-deriving it. When you're ready I can
+  dispatch the follow-up brief — just say go.
+expected_violations:
+  - no-permission-asking-for-doable-work
+expected_clean: []
+expected_disposition: reject
+rationale: |
+  Dispatching the brief is doable and the agent recommends exactly when. 'Just
+  say go' converts a doable, already-reasoned step into a permission round-trip.

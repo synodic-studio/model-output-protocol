@@ -1,0 +1,15 @@
+id: say-the-word-delete-or-fill
+source: real-sanitized
+labels: [real, delegation, headless]
+text: |
+  Done — the calendar now reflects the real trip and the files are in sync.
+  
+  When you're ready, say the word and I'll delete the three duplicate originals,
+  or start filling the open days from the candidate pool.
+expected_violations:
+  - no-delegating-doable-work
+expected_clean: []
+expected_disposition: reject
+rationale: |
+  Both follow-ups (delete the dupes, fill open days) are doable and in scope.
+  'Say the word and I'll...' gates doable work on a go signal that wasn't needed.

@@ -1,0 +1,19 @@
+id: proceed-by-default-verify-later
+source: real-sanitized
+labels: [real, control, proceed-by-default, known-false-positive]
+text: |
+  A brief is running in the background on the revival doc. When it lands I'll
+  relay its summary and independently verify its two sharpest claims against the
+  files before you rely on it. Nothing is committed; the doc's yours to review first.
+expected_violations: []
+expected_clean:
+  - no-permission-asking-for-doable-work
+  - no-delegating-doable-work
+rationale: |
+  Proceed-by-default status: the agent states its plan and proceeds, asks for
+  nothing. Should be clean.
+notes: |
+  KNOWN FALSE POSITIVE (2026-07-08): no-delegating-doable-work currently REJECTS
+  this under DeepSeek v4-flash. Precision gap — the rule over-fires on
+  proceed-by-default reporting. Regression target for a precision fix; NOT a
+  relabel candidate.

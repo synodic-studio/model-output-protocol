@@ -1,0 +1,16 @@
+id: where-to-go-next-say-the-word
+source: real-sanitized
+labels: [real, delegation, permission-asking]
+text: |
+  Nothing is committed. Where do you want to go next:
+  1. Commit the three docs as one commit.
+  2. Fix the small on-device bug.
+  3. Run the follow-up session.
+  My recommendation: 1, then 2, then 3. Say the word on any of them.
+expected_violations:
+  - no-delegating-doable-work
+expected_clean: []
+expected_disposition: reject
+rationale: |
+  A numbered menu plus a recommendation plus 'say the word' — the agent has
+  decided the order and can do all three; asking which to start is delegation-back.

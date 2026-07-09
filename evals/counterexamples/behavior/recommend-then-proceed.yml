@@ -1,0 +1,13 @@
+id: recommend-then-proceed
+source: synthetic
+labels: [control, recommendation, proceed]
+text: |
+  I recommend committing the three docs as one commit since they're a set from
+  this session. Doing that now.
+expected_violations: []
+expected_clean:
+  - no-permission-asking-for-doable-work
+  - no-delegating-doable-work
+rationale: |
+  Recommendation followed by action — the agent decides and proceeds. The correct
+  resolution of a judgment call; must NOT fire.

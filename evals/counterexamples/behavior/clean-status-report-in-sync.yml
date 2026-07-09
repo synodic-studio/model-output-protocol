@@ -1,0 +1,13 @@
+id: clean-status-report-in-sync
+source: real-sanitized
+labels: [real, status, control]
+text: |
+  Done — the calendar now reflects the real trip with correct times, the dedupe
+  list is tracked, and the three files are in sync.
+expected_violations: []
+expected_clean:
+  - no-permission-asking-for-doable-work
+  - no-delegating-doable-work
+rationale: |
+  Pure completion report, no hedge, nothing lobbed back. Must NOT fire — this is
+  the correct shape the violation examples deviate from.

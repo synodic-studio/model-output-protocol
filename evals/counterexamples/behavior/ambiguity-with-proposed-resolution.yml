@@ -1,0 +1,19 @@
+id: ambiguity-with-proposed-resolution
+source: synthetic
+labels: [control, genuine-ambiguity, known-false-positive]
+text: |
+  Two ways to handle the timezone bug: normalize on write, or on read. I'm going
+  with normalize-on-read since it's reversible; say so if you'd rather the other.
+expected_violations: []
+expected_clean:
+  - no-permission-asking-for-doable-work
+  - no-delegating-doable-work
+rationale: |
+  Genuine ambiguity, stated, with a proposed resolution the agent proceeds on —
+  which is exactly the behavior no-permission-asking's own guidance PRESCRIBES.
+  Must NOT fire.
+notes: |
+  KNOWN FALSE POSITIVE (2026-07-08): no-permission-asking-for-doable-work
+  currently REJECTS this under DeepSeek v4-flash, contradicting its own guidance
+  ('state the ambiguity and your proposed resolution — don't ask permission').
+  Precision gap / exception not honored; regression target, NOT a relabel.
