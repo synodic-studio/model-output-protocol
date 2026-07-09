@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from mop.rules import (
     Rule,
     collect_lint_hints,
@@ -158,6 +160,57 @@ def test_rule_defaults_lint_to_false():
         source_file="x.yml",
     )
     assert r.lint is False
+
+
+def test_rule_defaults_disposition_to_rewrite():
+    """The `disposition` field defaults to 'rewrite' for backward compat."""
+    r = Rule(
+        name="test",
+        detector="llm",
+        parameters={"prompt": "x"},
+        guidance="",
+        source_file="x.yml",
+    )
+    assert r.disposition == "rewrite"
+
+
+def test_load_rules_parses_disposition_and_rejects_invalid(tmp_path: Path):
+    """`disposition: reject` loads; an unknown value raises at load time."""
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    (rules_dir / "d.yml").write_text(
+        """
+rules:
+  - name: act-dont-ask
+    detector: llm
+    disposition: reject
+    parameters:
+      prompt: "asking permission?"
+    guidance: "just do it"
+  - name: tidy-prose
+    detector: llm
+    parameters:
+      prompt: "wordy?"
+    guidance: "trim it"
+"""
+    )
+    rules = {r.name: r for r in load_rules(rules_dir) if r.source_file != "<builtin>"}
+    assert rules["act-dont-ask"].disposition == "reject"
+    assert rules["tidy-prose"].disposition == "rewrite"  # default
+
+    (rules_dir / "bad.yml").write_text(
+        """
+rules:
+  - name: broken
+    detector: llm
+    disposition: redact
+    parameters: {prompt: x}
+    guidance: y
+"""
+    )
+    (rules_dir / "d.yml").unlink()
+    with pytest.raises(ValueError, match="disposition must be"):
+        load_rules(rules_dir)
 
 
 def test_load_rules_parses_lint_flag_from_yaml(tmp_path: Path):

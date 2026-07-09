@@ -94,8 +94,20 @@ def _build_query(
     justification: str | None,
 ) -> str:
     rule_lines = "\n".join(
-        f"  - {r.name}: {(r.guidance or '').strip()}" for r in rules
+        f"  - {r.name} [{r.disposition}]: {(r.guidance or '').strip()}"
+        for r in rules
     ) or "  (no active rules)"
+    reject_names = [r.name for r in rules if r.disposition == "reject"]
+    reject_line = (
+        "\nRules tagged [reject] are NOT rewritable: the fix is an action the "
+        "agent must take, not a wording change. If the message violates one, DO "
+        "NOT rewrite it — set 'rewritten' to null and list that rule in "
+        "'unresolved'. A [reject] violation dominates: if any [reject] rule "
+        "fires, leave the text unchanged and list every violated rule in "
+        f"'unresolved'. Reject-disposition rules: {', '.join(reject_names)}.\n"
+        if reject_names
+        else ""
+    )
     det_line = (
         "These deterministic rules are CONFIRMED violated and MUST be removed "
         f"in your rewrite: {', '.join(deterministic_violations)}"
@@ -113,14 +125,17 @@ def _build_query(
         "You are a message gate. Active rules:\n"
         f"{rule_lines}\n\n"
         f"{det_line}\n\n"
+        f"{reject_line}"
         "Message under review:\n"
         f"<message>\n{text}\n</message>\n"
         f"{just_line}\n\n"
-        "Produce your BEST-EFFORT rewrite that fixes every violation you can "
-        "(including the confirmed deterministic ones), preserving the message's "
-        "intent. List the names of any rules you could NOT fix in 'unresolved'. "
-        "If the message already passes every rule, set 'rewritten' to null and "
-        "'unresolved' to [].\n\n"
+        "Produce your BEST-EFFORT rewrite that fixes every REWRITABLE violation "
+        "you can (including the confirmed deterministic ones), preserving the "
+        "message's intent. NEVER rewrite to satisfy a [reject] rule — if one is "
+        "violated, leave the text unchanged (set 'rewritten' to null) and name "
+        "it in 'unresolved'. List in 'unresolved' every rule you could not fix, "
+        "plus every violated [reject] rule. If the message already passes every "
+        "rule, set 'rewritten' to null and 'unresolved' to [].\n\n"
         "Respond ONLY with a JSON object of the shape:\n"
         '  {"rewritten": string or null,\n'
         '   "unresolved": [string, ...]}\n'

@@ -68,6 +68,7 @@ class Counterexample:
     source: str
     rationale: str
     file_path: str
+    expected_disposition: str | None = None  # "reject" | "rewrite" | None (don't assert)
 
 
 def load_rules(rules_dir: Path) -> list[Rule]:
@@ -103,6 +104,7 @@ def load_counterexamples(corpus_dir: Path) -> list[Counterexample]:
                 source=data.get("source", "synthetic"),
                 rationale=data.get("rationale", ""),
                 file_path=str(path.relative_to(REPO_ROOT)),
+                expected_disposition=data.get("expected_disposition"),
             )
         )
     return examples
@@ -203,6 +205,23 @@ def run_llm_eval(
             fired = not isinstance(verdict, Accepted)  # rewrote or rejected
 
             if fired and should_violate:
+                # Optionally assert the *disposition* (reject vs rewrite), not
+                # just that it fired. Rejected → "reject"; Rewritten → "rewrite".
+                want_disp = example.expected_disposition
+                if want_disp:
+                    got_disp = "reject" if isinstance(verdict, Rejected) else "rewrite"
+                    if got_disp != want_disp:
+                        mismatches.append(
+                            {
+                                "type": "wrong_disposition",
+                                "rule": rr.name,
+                                "example": example.id,
+                                "file": example.file_path,
+                                "expected": want_disp,
+                                "got": got_disp,
+                            }
+                        )
+                        continue
                 correct += 1
             elif not fired and should_be_clean:
                 correct += 1

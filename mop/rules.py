@@ -53,6 +53,13 @@ class Rule:
     source_file: str
     lint: bool = False      # True for MOP's bundled deterministic checks
     active: bool = True     # False only reachable via include_inactive=True
+    # "rewrite" (default): the evaluator produces a best-effort rewrite that
+    # fixes the violation. "reject": the violation is not text-fixable (the fix
+    # is an *action*, e.g. "do the doable work" or "continue the task"), so the
+    # evaluator must NOT rewrite — it leaves the text unchanged and names the
+    # rule in `unresolved`, which the derivation turns into a Rejected verdict
+    # carrying the guidance as the reason. See mop/evaluators.py::_build_query.
+    disposition: str = "rewrite"
 
 
 def _entry_is_active(entry: dict) -> bool:
@@ -69,6 +76,12 @@ def _rules_from_file(
     for entry in data.get("rules", []):
         if not include_inactive and not _entry_is_active(entry):
             continue
+        disposition = entry.get("disposition", "rewrite")
+        if disposition not in ("rewrite", "reject"):
+            raise ValueError(
+                f"rule {entry['name']!r}: disposition must be 'rewrite' or "
+                f"'reject', got {disposition!r}"
+            )
         rules.append(
             Rule(
                 name=entry["name"],
@@ -78,6 +91,7 @@ def _rules_from_file(
                 source_file=source_label,
                 lint=bool(entry.get("lint", False)),
                 active=_entry_is_active(entry),
+                disposition=disposition,
             )
         )
     return rules

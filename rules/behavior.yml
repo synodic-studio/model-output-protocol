@@ -1,6 +1,7 @@
 rules:
 - name: no-permission-asking-for-doable-work
   detector: llm
+  disposition: reject
   description: Don't ask permission for work the agent has the tools to do
   parameters:
     prompt: 'Is this message asking the user permission to do work the agent
@@ -45,6 +46,7 @@ rules:
 
 - name: no-delegating-doable-work
   detector: llm
+  disposition: reject
   description: Don't ask or tell the user to do work the agent could do itself
   parameters:
     prompt: |
@@ -79,6 +81,7 @@ rules:
 
 - name: no-flag-when-fix-is-obvious
   detector: llm
+  disposition: reject
   description: If the agent identifies a fixable defect (typo, stale info), it must fix it, not flag or ask
   parameters:
     prompt: |
@@ -117,6 +120,7 @@ rules:
 - name: no-stop-mid-task-for-confirmation
   active: false
   detector: llm
+  disposition: reject
   description: Don't stop mid-task to confirm continuation
   parameters:
     prompt: |

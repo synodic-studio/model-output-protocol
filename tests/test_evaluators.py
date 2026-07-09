@@ -10,6 +10,33 @@ from mop.evaluators import DEFAULT_MODEL, resolve_model
 from mop.types import Accepted, Rejected, Rewritten
 
 
+def _rule(name: str, disposition: str = "rewrite"):
+    from mop.rules import Rule
+
+    return Rule(
+        name=name,
+        detector="llm",
+        parameters={"prompt": "x"},
+        guidance=f"guidance for {name}",
+        source_file="t.yml",
+        disposition=disposition,
+    )
+
+
+def test_build_query_emits_reject_instruction_only_for_reject_rules():
+    """A [reject] rule injects the do-not-rewrite instruction; rewrite rules don't."""
+    from mop.evaluators import _build_query
+
+    q_reject = _build_query([_rule("act-dont-ask", "reject")], "text", [], None)
+    assert "[reject]" in q_reject
+    assert "NOT rewritable" in q_reject
+    assert "act-dont-ask" in q_reject
+
+    q_rewrite = _build_query([_rule("tidy-prose", "rewrite")], "text", [], None)
+    assert "NOT rewritable" not in q_rewrite
+    assert "[rewrite]" in q_rewrite
+
+
 def _fake_completion(payload: dict):
     """Mimic litellm.acompletion's response shape: choices[0].message.content."""
     message = MagicMock()
