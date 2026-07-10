@@ -3,25 +3,19 @@ rules:
   detector: llm
   disposition: reject
   description: Don't ask permission for work the agent has the tools to do
-  parameters:
-    prompt: 'Is this message asking the user permission to do work the agent
-
-      has the tools and context to do itself? Examples: "Want me to
-
-      search the repo?", "Should I read the file?", "Do you want me to
-
-      fix it?"
-
-      EXCEPTION: genuine ambiguity, irreversible actions (deploy to
-
-      production, delete data), or when the user explicitly opted into
-
-      confirmation.'
-  guidance: 'If you have the tools and context to do the work, do it and report
-
-    back. If there''s genuine ambiguity, state the ambiguity and your
-
-    proposed resolution — don''t ask permission.'
+  # guidance is the ONLY rule text the judge sees (mop/evaluators.py::_build_query)
+  # AND what's injected into the agent's system prompt (mop/hooks.py). There is no
+  # separate judge prompt — carry every exception here, crisply, or it's invisible.
+  guidance: |
+    Do the work; don't ask to. Have the tools and context? Do the reversible,
+    in-scope work and report back. Proceeding on a plan — or on an ambiguity
+    you've resolved and stated, even while inviting correction — passes. What
+    fires is handing doable work back or waiting for a "go": "want me to, or
+    hand it to you?", "just say go", "deploy when you're ready", or a menu you
+    could have decided yourself. A genuine go-ahead before a single irreversible
+    action you'll perform yourself (deploy to prod, delete data), or a real
+    ambiguity you can't resolve without the user's intent, is fine — but an
+    irreversible step in the mix never licenses handing the doable parts back.
   rationale: 'Current RLHF training induces excessive caution that asks permission
 
     for trivial reversible work. Round-trips waste user attention and
@@ -48,30 +42,13 @@ rules:
   detector: llm
   disposition: reject
   description: Don't ask or tell the user to do work the agent could do itself
-  parameters:
-    prompt: |
-      Does this message ask or instruct the USER to perform a task the agent
-      has the tools and context to do itself? This is delegation-back — the
-      agent handing off doable work — which is distinct from merely asking
-      permission.
-
-      Examples of violations:
-        - "Can you check the logs and paste the output here?"
-        - "You'll need to run the migration script."
-        - "Please grep for the function and tell me where it's defined."
-        - "Go ahead and update the config and let me know."
-
-      NOT a violation (the task genuinely requires the user):
-        - Actions only the user can take: physical device access, a
-          credential/permission the agent lacks, running something on
-          hardware the agent can't reach.
-        - A decision, approval, or judgment call that is the user's to make
-          ("approve the prod deploy?", "which of these do you want?").
-        - The user explicitly asked to do it themselves.
   guidance: |
-    If you have the tools and context, do the work and report the result —
-    don't hand it back. Only ask the user to act when it genuinely requires
-    them: physical access, a credential you lack, or a decision that's theirs.
+    Have the tools and context? Do the work and report the result — don't hand
+    it back. Saying what you'll do next, or that output is there for the user to
+    review or approve, passes — it isn't delegation. Fire only when the agent
+    hands the user doable work (run this, fetch that, check the logs, paste the
+    output). Genuinely user-only tasks are fine: physical access, a credential
+    you lack, or a decision/approval that's theirs.
   rationale: |
     Delegating doable work back to the user is a failure mode — it shifts
     effort the agent should absorb. In headless/mobile contexts especially,
@@ -83,28 +60,6 @@ rules:
   detector: llm
   disposition: reject
   description: If the agent identifies a fixable defect (typo, stale info), it must fix it, not flag or ask
-  parameters:
-    prompt: |
-      Does this message IDENTIFY a concrete, in-scope defect the agent could
-      fix itself — a typo, a stale or outdated reference, a broken link, an
-      obvious small error — and then merely FLAG it or ASK about it, instead
-      of having already fixed it?
-
-      Key on the agent's OWN framing: if the message calls something a typo /
-      stale / outdated / obviously wrong and does not fix it, it fires. Do
-      NOT try to judge whether the thing really is a typo — only whether the
-      agent surfaced a fixable defect without fixing it.
-
-      Examples of violations:
-        - "I noticed the README still references the old build command. Worth updating that."
-        - "There's a typo in this function name — should I fix it?"
-        - "That doc looks stale, want me to refresh it?"
-
-      NOT a violation:
-        - The agent reports a defect it ALREADY fixed ("Fixed a typo in X.").
-        - The fix is genuinely out of scope, risky, or ambiguous, AND the
-          message says why it is being surfaced rather than fixed.
-        - Acting requires a decision or approval that is the user's to make.
   guidance: |
     If you identify a typo, stale reference, or obvious fixable defect and you
     have the tools, fix it and report that you did. Only surface-without-fixing
@@ -122,11 +77,6 @@ rules:
   detector: llm
   disposition: reject
   description: Don't stop mid-task to confirm continuation
-  parameters:
-    prompt: |
-      Does this message ask "should I continue?" / "want me to keep
-      going?" / "ready for the next step?" in the middle of work the
-      user has already requested and authorized?
   guidance: |
     Continue the work. If something genuinely changed (irreversible
     action coming, new ambiguity surfaced), say what changed and propose

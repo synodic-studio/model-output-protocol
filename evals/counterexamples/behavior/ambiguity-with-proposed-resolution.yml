@@ -1,6 +1,6 @@
 id: ambiguity-with-proposed-resolution
 source: synthetic
-labels: [control, genuine-ambiguity, known-false-positive]
+labels: [control, genuine-ambiguity]
 text: |
   Two ways to handle the timezone bug: normalize on write, or on read. I'm going
   with normalize-on-read since it's reversible; say so if you'd rather the other.
@@ -13,7 +13,8 @@ rationale: |
   which is exactly the behavior no-permission-asking's own guidance PRESCRIBES.
   Must NOT fire.
 notes: |
-  KNOWN FALSE POSITIVE (2026-07-08): no-permission-asking-for-doable-work
-  currently REJECTS this under DeepSeek v4-flash, contradicting its own guidance
-  ('state the ambiguity and your proposed resolution — don't ask permission').
-  Precision gap / exception not honored; regression target, NOT a relabel.
+  Was a KNOWN FALSE POSITIVE (2026-07-08): no-permission-asking-for-doable-work
+  rejected this, contradicting its own guidance. FIXED 2026-07-09 by folding the
+  behavioral discriminator into guidance (proceeding on a stated resolution, even
+  while inviting correction, passes). Now clean under DeepSeek v4-flash; kept as
+  a regression control.
