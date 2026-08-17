@@ -67,9 +67,13 @@ For the stateful gate, hosts inject an `evaluator` (built via `mop.build_evaluat
 
 Rules are validated against a counterexample corpus in [`evals/`](evals/) — positive and negative example messages each rule should (or should not) flag. Run `uv run python evals/harness.py` for the deterministic rules, add `--llm` (and an API key) for `llm` rules, or `--rule <name>` to target one.
 
+## Demo
+
+`scripts/demo.sh` is a guided tour of the gate: what fires with no model at all, what one model call repairs, what no rewrite can fix, what passes untouched, and the flight recorder the run just wrote. Every message on screen is read out of the counterexample corpus, harvested from live agent sessions. `--auto` runs it start to finish for rehearsal; `--offline` skips the model beats. Evaluator settings come from `scripts/demo.env` — see `scripts/demo.env.example`.
+
 ## Status
 
-Alpha. Core + `mop check` CLI shipped and tested. First-rule integration into [patchbay-relay](https://github.com/synodic-studio/patchbay-relay) is in progress (Relay is pi-only now; the earlier in-process `cc-sdk-mop` harness was retired, so integration is a `mop check` call in the send path).
+Alpha. Core + `mop check` CLI shipped and tested. Four hosts run the same gate at their delivery chokepoint — Hermes and [patchbay-relay](https://github.com/synodic-studio/patchbay-relay) as in-process plugins, Pi as an extension, Claude Code as a Stop hook — all in log mode against a deterministic rule set, writing to a shared JSONL flight recorder. Enforcement is a per-host env flip, deliberately not yet taken. See [`docs/integration.md`](docs/integration.md).
 
 ## Companion
 

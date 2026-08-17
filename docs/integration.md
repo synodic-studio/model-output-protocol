@@ -186,27 +186,39 @@ compatibility" section of [architecture.md](architecture.md).
 
 ## Deployment wiring — where audit logging is turned on
 
-The flight recorder only writes when `MOP_AUDIT_LOG` names a directory
-(`mop/host.py::gate`, guarded by `if audit_dir:`). A plugin can be installed and
-running and still record **nothing** if the var is unset — that is the default,
-and it is the trap to check first when "logging looks dead."
+Two vars have to be set, and either one missing produces a recorder full of
+nothing:
 
-Canonical audit dir on this machine: `/Users/bryancostanza/.mop/audit`
-(daily-rotated `YYYY-MM-DD.jsonl`, UTC-dated). Per-host wiring:
+- `MOP_AUDIT_LOG` names the directory, or nothing is written at all
+  (`mop/host.py::gate`, guarded by `if audit_dir:`).
+- `MOP_RULES_DIR` names the rule set, or **zero rules resolve** and every
+  message is accepted unread. This one is quieter and worse: the records land,
+  they just all say `accepted` with an empty `rule_names`.
+
+Canonical dirs on this machine: audit at `/Users/bryancostanza/.mop/audit`
+(daily-rotated `YYYY-MM-DD.jsonl`, UTC-dated), rules at
+`/Users/bryancostanza/.mop/rules` — deterministic detectors only, so a verdict
+costs no model call and adds no latency. Per-host wiring:
 
 - **Hermes** — `EnvironmentVariables` in
   `~/Library/LaunchAgents/ai.hermes.gateway.plist` (`MOP_AUDIT_LOG`,
-  `MOP_MODE=log`). Launched Python directly, so plist env reaches the process.
+  `MOP_RULES_DIR`, `MOP_MODE=log`). Launched Python directly, so plist env
+  reaches the process.
 - **patchbay-relay** — `EnvironmentVariables` in
-  `~/Library/LaunchAgents/com.synodic.patchbay-relay.plist` (`MOP_AUDIT_LOG`;
-  runs `MOP_MODE=enforce`). Goes through `run.sh`, which inherits (does not
-  scrub) the plist env.
+  `~/Library/LaunchAgents/com.synodic.patchbay-relay.plist` (`MOP_AUDIT_LOG`,
+  `MOP_RULES_DIR`, `MOP_MODE=log`). Goes through `run.sh`, which inherits (does
+  not scrub) the plist env. Log mode is the shadow launch: flip `MOP_MODE` to
+  `enforce` once the rule set has been vetted against real traffic, and a
+  deterministic hit starts redacting a real Telegram message.
 - **Claude Code** — stock CC has no pre-delivery hook, so audit-only via a Stop
   hook: `~/.claude/hooks/mop-audit-stop.py` (registered in `~/.claude/settings.json`).
   It pulls the last assistant message's `text` blocks only (never `thinking`/
-  `tool_use`) and shells to `mop check --host claude-code`.
+  `tool_use`) and shells to
+  `mop check --host claude-code --rules-dir ~/.mop/rules --no-rewrite`. The CLI
+  reads no `MOP_RULES_DIR`, hence the explicit flag; `--no-rewrite` keeps a
+  deterministic-only run from dispatching a model call it would only discard.
 - **Pi** — `mop.ts` shells to `mop check` reading `MOP_AUDIT_LOG`; interactive,
-  not a launchd service, so wire the var in Pi's own env when that surface is
+  not a launchd service, so wire the vars in Pi's own env when that surface is
   activated.
 
 After editing a plist you must `launchctl bootout` + `bootstrap gui/$(id -u)` —
@@ -221,7 +233,14 @@ cat ~/.mop/audit/*.jsonl | python3 -c "import sys,json,collections; \
 print(collections.Counter(json.loads(l)['host'] for l in sys.stdin if l.strip()))"
 ```
 
-should show `hermes`, `patchbay-relay`, and `claude-code`.
+should show `hermes`, `patchbay-relay`, and `claude-code`. Add the rule set to
+the same check — an empty `rule_names` means the host is logging, but judging
+nothing:
+
+```
+cat ~/.mop/audit/*.jsonl | python3 -c "import sys,json,collections; \
+print(collections.Counter(bool(json.loads(l)['rule_names']) for l in sys.stdin if l.strip()))"
+```
 
 ---
 

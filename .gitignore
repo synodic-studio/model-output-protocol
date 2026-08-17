@@ -13,3 +13,6 @@ build/
 *.plist
 !docs/*.plist
 web/diagram-feedback.txt
+
+# Demo credentials
+scripts/demo.env

@@ -1,0 +1,73 @@
+# The rule set the demo runs on — a `.mop/` overlay like a project would write.
+#
+# Five rules, chosen to put every moving part on screen: two deterministic
+# detectors (regex, length), three judged by the model, and both dispositions
+# (rewrite and reject). Everything here is copied verbatim from rules/ with
+# `active: true`; nothing is demo-only behavior.
+#
+# Passed explicitly: `mop check --rules-dir scripts/demo-rules`.
+
+rules:
+
+  - name: no-cheerleading-phrases
+    active: true
+    detector: regex
+    description: Empty praise patterns ("Great job!", "You're absolutely right!")
+    guidance: |
+      Drop the praise and open with the substance. No "great question", no
+      "you're absolutely right", no "excellent work" — agreement is shown by
+      acting on it, and a correction needs the correction, not applause.
+    parameters:
+      patterns:
+        - "(?i)\\bgreat (job|work|question|catch|point)\\b"
+        - "(?i)\\bexcellent (work|job|question|point|catch)\\b"
+        - "(?i)\\b(absolutely|totally|exactly|completely) (right|correct)\\b"
+        - "(?i)\\bwhat a (great|good) (idea|question)\\b"
+        - "(?i)(^|[.!?)\\]\"']\\s+|\\n\\s*)you('| a)?re right\\b"
+        - "(?i)\\bgood (catch|call|question)\\b"
+
+  - name: length-cap-chat
+    active: true
+    detector: length
+    description: Chat messages over ~200 words should be moved to a document
+    guidance: |
+      Keep it short. Past ~200 words, the detail belongs in a document — write
+      the file and send a one-line summary plus the link, not the wall of text.
+    parameters:
+      max_words: 200
+
+  - name: no-trailing-summary
+    active: true
+    detector: llm
+    description: Don't restate what was just done if the user can see the result
+    guidance: |
+      End on the last substantive point. Don't close by recapping work the user
+      can already see — the diff, the file, the command output. A closing line
+      earns its place only when it carries something the artifact doesn't.
+
+  - name: no-permission-asking-for-doable-work
+    active: true
+    detector: llm
+    disposition: reject
+    description: Don't ask permission for work the agent has the tools to do
+    guidance: |
+      Do the work; don't ask to. Have the tools and context? Do the reversible,
+      in-scope work and report back. Proceeding on a plan — or on an ambiguity
+      you've resolved and stated, even while inviting correction — passes. What
+      fires is handing doable work back or waiting for a "go": "want me to, or
+      hand it to you?", "just say go", "deploy when you're ready", or a menu you
+      could have decided yourself. A genuine go-ahead before a single irreversible
+      action you'll perform yourself (deploy to prod, delete data), or a real
+      ambiguity you can't resolve without the user's intent, is fine — but an
+      irreversible step in the mix never licenses handing the doable parts back.
+
+  - name: no-flag-when-fix-is-obvious
+    active: true
+    detector: llm
+    disposition: reject
+    description: If the agent identifies a fixable defect, it must fix it, not flag it
+    guidance: |
+      If you identify a typo, stale reference, or obvious fixable defect and you
+      have the tools, fix it and report that you did. Only surface-without-fixing
+      when the fix is genuinely out of scope, risky, or the user's call — and
+      then say why.
