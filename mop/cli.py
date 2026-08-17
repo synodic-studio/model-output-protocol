@@ -37,6 +37,30 @@ EXIT_ERROR = 3
 _DETERMINISTIC = ("regex", "script", "length")
 
 
+def _require_rules_dir(rules_dir: Path | None) -> None:
+    """Refuse to run when an explicit ``--rules-dir`` yields no rules.
+
+    A built-in lint merges into every load, so a missing or misspelled
+    ``--rules-dir`` would otherwise resolve to that one lint and exit 0 —
+    the user believes their rules ran when nothing of theirs did. Asking
+    for rules from a place and getting none is a hard error (EXIT_ERROR),
+    never a silent degrade. Discovery is untouched: this only fires when
+    the path was named on the command line.
+    """
+    if rules_dir is None:
+        return
+    if not rules_dir.exists():
+        raise ValueError(f"--rules-dir {str(rules_dir)!r}: no such directory.")
+    if not rules_dir.is_dir():
+        raise ValueError(f"--rules-dir {str(rules_dir)!r}: not a directory.")
+    if not os.access(rules_dir, os.R_OK | os.X_OK):
+        raise ValueError(f"--rules-dir {str(rules_dir)!r}: not readable.")
+    if not any(rules_dir.rglob("*.yml")):
+        raise ValueError(
+            f"--rules-dir {str(rules_dir)!r}: no rule files (*.yml) found."
+        )
+
+
 def _deterministic_hits(text: str, rules: list[Rule]) -> list[str]:
     """Names of active deterministic rules that fire on `text` (authoritative)."""
     return [
@@ -239,14 +263,20 @@ def _build_parser() -> argparse.ArgumentParser:
         description=(
             "Evaluate text against local .mop/ rules. Built-ins are OFF by "
             "default — pass --builtins to include the packaged rule set. With "
-            "no rules at all, MOP warns and accepts (enforces nothing). Set "
-            "MOP_AUDIT_LOG=<dir> to record every verdict as JSONL."
+            "no rules at all, MOP warns and accepts (enforces nothing); but an "
+            "explicit --rules-dir that is missing or holds no *.yml is an error "
+            "(exit 3), never a silent fallback. Set MOP_AUDIT_LOG=<dir> to "
+            "record every verdict as JSONL."
         ),
     )
     check_p.add_argument("text", nargs="?", help="Text to check (or use --file/stdin)")
     check_p.add_argument("--file", type=Path, help="Read the text from a file")
     check_p.add_argument("--builtins", action="store_true", help="Include packaged built-in rules (default: off)")
-    check_p.add_argument("--rules-dir", type=Path, help="Explicit rules dir (skips discovery)")
+    check_p.add_argument(
+        "--rules-dir",
+        type=Path,
+        help="Explicit rules dir (skips discovery); errors if missing or empty",
+    )
     check_p.add_argument("--rules-file", type=Path, help="Explicit rules file (skips discovery)")
     check_p.add_argument("--rule", help="Restrict evaluation to one named rule")
     check_p.add_argument("--model", help="litellm model string (default: MOP_EVALUATOR_MODEL)")
@@ -264,7 +294,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     rules_p = sub.add_parser("rules", help="List or show rules.")
     rules_p.add_argument("--builtins", action="store_true", help="Include packaged built-in rules (default: off)")
-    rules_p.add_argument("--rules-dir", type=Path, help="Explicit rules dir (skips discovery)")
+    rules_p.add_argument(
+        "--rules-dir",
+        type=Path,
+        help="Explicit rules dir (skips discovery); errors if missing or empty",
+    )
     rules_p.add_argument("--rules-file", type=Path, help="Explicit rules file (skips discovery)")
     rules_p.add_argument("--json", action="store_true", dest="as_json")
     rules_p.add_argument(
@@ -361,6 +395,7 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_ERROR
         raise  # code 0 (e.g. --help) propagates normally
     try:
+        _require_rules_dir(getattr(args, "rules_dir", None))
         if args.command == "rules":
             rules = resolve_rules(
                 rules_dir=args.rules_dir,

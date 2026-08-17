@@ -445,3 +445,112 @@ def test_rules_show_json_after_subcommand(repo, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["name"] == "no-fabricated-attribution"
     assert payload["detector"] == "llm"
+
+
+# ---------------------------------------------------------------------------
+# --rules-dir must never silently degrade to the built-in lint
+# ---------------------------------------------------------------------------
+
+
+_ONE_RULE = {
+    "rules": [{"name": "no-hype", "detector": "llm", "guidance": "No hype words."}]
+}
+
+
+def test_rules_dir_missing_errors(repo, monkeypatch, capsys):
+    """A --rules-dir that does not exist stops the run; it does not fall back."""
+    _patch_evaluator(monkeypatch, Accepted())
+    code = main(["check", "text", "--rules-dir", str(repo / "nope")])
+    assert code == EXIT_ERROR
+    err = capsys.readouterr().err
+    assert "no such directory" in err
+    assert "nope" in err
+
+
+def test_rules_dir_typo_errors_even_when_sibling_exists(repo, monkeypatch, capsys):
+    """A typo'd path is indistinguishable from a missing one — both must stop."""
+    good = repo / ".mop"
+    good.mkdir()
+    (good / "local.yml").write_text(yaml.safe_dump(_ONE_RULE))
+    _patch_evaluator(monkeypatch, Accepted())
+    code = main(["check", "text", "--rules-dir", str(repo / ".moop")])
+    assert code == EXIT_ERROR
+    assert "no such directory" in capsys.readouterr().err
+
+
+def test_rules_dir_empty_errors(repo, monkeypatch, capsys):
+    """An existing dir holding no *.yml is the same failure: asked, got nothing."""
+    empty = repo / "empty-rules"
+    empty.mkdir()
+    _patch_evaluator(monkeypatch, Accepted())
+    code = main(["check", "text", "--rules-dir", str(empty)])
+    assert code == EXIT_ERROR
+    assert "no rule files" in capsys.readouterr().err
+
+
+def test_rules_dir_file_not_dir_errors(repo, monkeypatch, capsys):
+    not_a_dir = repo / "rules.yml"
+    not_a_dir.write_text(yaml.safe_dump(_ONE_RULE))
+    _patch_evaluator(monkeypatch, Accepted())
+    code = main(["check", "text", "--rules-dir", str(not_a_dir)])
+    assert code == EXIT_ERROR
+    assert "not a directory" in capsys.readouterr().err
+
+
+def test_rules_dir_valid_still_works(repo, monkeypatch, capsys):
+    """The legitimate case is untouched: a real dir with rules evaluates normally."""
+    good = repo / "rules"
+    good.mkdir()
+    (good / "local.yml").write_text(yaml.safe_dump(_ONE_RULE))
+    _patch_evaluator(monkeypatch, Rejected(unresolved=["no-hype"]))
+    code = main(["check", "AMAZING!!!", "--rules-dir", str(good), "--json"])
+    assert code == EXIT_REJECTED
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["unresolved"] == [{"name": "no-hype", "guidance": "No hype words."}]
+
+
+def test_no_rules_dir_still_accepts_with_builtins_only(repo, monkeypatch, capsys):
+    """No --rules-dir at all: built-ins only, still exit 0. Not the failure case."""
+    _patch_evaluator(monkeypatch, Accepted())
+    code = main(["check", "hello world", "--json"])
+    assert code == EXIT_ACCEPTED
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["verdict"] == "accepted"
+
+
+def test_rules_list_missing_rules_dir_errors(repo, capsys):
+    """`mop rules list` lies just as loudly as `check`, so it stops too."""
+    code = main(["rules", "list", "--rules-dir", str(repo / "nope")])
+    assert code == EXIT_ERROR
+    assert "no such directory" in capsys.readouterr().err
+
+
+def test_rules_list_empty_rules_dir_errors(repo, capsys):
+    empty = repo / "empty-rules"
+    empty.mkdir()
+    code = main(["rules", "list", "--rules-dir", str(empty)])
+    assert code == EXIT_ERROR
+    assert "no rule files" in capsys.readouterr().err
+
+
+def test_rules_dir_with_only_inactive_rules_is_allowed(repo, monkeypatch, capsys):
+    """`active: false` is a real config (it silences a built-in), not a typo."""
+    d = repo / "rules"
+    d.mkdir()
+    (d / "local.yml").write_text(
+        yaml.safe_dump(
+            {
+                "rules": [
+                    {
+                        "name": "no-fabricated-attribution",
+                        "detector": "llm",
+                        "guidance": "g",
+                        "active": False,
+                    }
+                ]
+            }
+        )
+    )
+    _patch_evaluator(monkeypatch, Accepted())
+    code = main(["check", "text", "--rules-dir", str(d), "--builtins"])
+    assert code == EXIT_ACCEPTED
