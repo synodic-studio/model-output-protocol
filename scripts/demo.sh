@@ -44,8 +44,8 @@
 #      "Every verdict lands as one JSON line. mine_audit.py turns real
 #       verdicts back into counterexamples — the one you just watched get
 #       rejected came out of that log; the other two out of raw session
-#       logs. Four hosts, one engine; three of them writing records on this
-#       machine today. None of them are acting: they run a deterministic-only
+#       logs. Four hosts, one engine; three of them have written records on
+#       this machine. None of them are acting: they run a deterministic-only
 #       set in log mode, which costs nothing and never touches a message.
 #       Everything you just watched it do — the rewrite, the rejection —
 #       is switched on inside this repo and nowhere else. A rule set earns
