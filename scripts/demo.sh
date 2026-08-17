@@ -191,13 +191,16 @@ PY
 
 beat_close() {
   beat "where it actually runs"
-  printf '  %sClaude Code%s      Stop hook, generated from the same rules\n' "$B" "$R"
-  printf '                   %sscripts/gen_cc_hook.py --rules-dir ...%s\n' "$D" "$R"
-  printf '  %spatchbay-relay%s   filter on the Telegram send path\n' "$B" "$R"
+  printf '  %spatchbay-relay%s   in-process filter on the Telegram send path\n' "$B" "$R"
   printf '  %sHermes%s           plugin on the outbound hook\n' "$B" "$R"
-  printf '  %spi%s               extension, integrations/pi/mop.ts\n\n' "$B" "$R"
-  say "  One engine, one rule file, four hosts. Each shifts between log mode"
-  say "  (judge and record, never alter) and enforce mode."
+  printf '  %sClaude Code%s      Stop hook — no pre-delivery hook exists, so it\n' "$B" "$R"
+  printf '                   observes and records rather than gates\n'
+  printf '  %spi%s               extension on message_end, shells to the CLI\n\n' "$B" "$R"
+  say "  One engine, one rule file. Every host is in log mode — judge and"
+  say "  record, never alter — writing to the recorder you just saw. Enforce"
+  say "  is one env var, deliberately not yet flipped: a rule set earns that"
+  say "  by being right about real traffic first, and the recorder is the"
+  say "  evidence."
   echo
   printf '  %sgithub.com/synodic-studio/model-output-protocol%s\n' "$D" "$R"
 }
