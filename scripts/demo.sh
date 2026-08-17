@@ -7,7 +7,7 @@
 # in evals/ — harvested from live agent sessions, not written for the slide.
 #
 #   --auto     run start to finish with no interaction, for rehearsal
-#   --offline  skip the three beats that call a model
+#   --offline  skip the two beats that call a model
 #   --model M  evaluator override, tier or provider/model
 #
 # Nothing needs typing; one keypress advances a beat. Evaluator settings
@@ -42,9 +42,10 @@
 #
 #   4. The flight recorder this run wrote, then the four hosts.
 #      "Every verdict lands as one JSON line. mine_audit.py turns real
-#       verdicts back into counterexamples — which is where the messages
-#       you just watched came from. Four hosts, one engine. All four are
-#       recording, none of them are acting: they run a deterministic-only
+#       verdicts back into counterexamples — the one you just watched get
+#       rejected came out of that log; the other two out of raw session
+#       logs. Four hosts, one engine; three of them writing records on this
+#       machine today. None of them are acting: they run a deterministic-only
 #       set in log mode, which costs nothing and never touches a message.
 #       Everything you just watched it do — the rewrite, the rejection —
 #       is switched on inside this repo and nowhere else. A rule set earns

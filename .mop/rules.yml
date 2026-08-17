@@ -10,7 +10,9 @@
 #
 # Five rules, chosen to put every moving part on screen: two deterministic
 # detectors (regex, length), three judged by the model, and both dispositions
-# (rewrite and reject). Everything here is copied verbatim from rules/ with
+# (rewrite and reject). The packaged `format-score-too-high` script lint always
+# resolves in alongside them, so `mop rules list` reports six rules and all four
+# detector kinds. Everything here is copied verbatim from rules/ with
 # `active: true`; nothing is demo-only behavior.
 
 rules:
