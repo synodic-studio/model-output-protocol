@@ -50,6 +50,7 @@ mop rules list --builtins                                  # inspect the resolve
 
 - **Exit codes:** `0` accepted, `1` rewritten, `2` rejected, `3` usage/runtime error.
 - **Built-ins are opt-in:** `mop check` runs only your local `.mop/` rules unless you pass `--builtins`. With no rules at all it warns `no active rules — MOP enforced nothing` and accepts (exit 0) — it never imposes defaults or hard-fails a fresh repo.
+- **`--rules-dir` is a promise, not a hint:** a path named on the command line that is missing, unreadable, or holds no `*.yml` is an error (exit 3). MOP will not quietly resolve to the built-in lint and report success on a rule set that never ran.
 - **`.mop/` discovery:** walks up from the cwd to the first `.git` ancestor. Local rules layer over the (opt-in) built-ins — same-name replaces, `active: false` silences.
 - **Observability:** set `MOP_AUDIT_LOG=<dir>` to append every verdict to a daily-rotated JSONL flight recorder.
 
