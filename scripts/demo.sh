@@ -43,9 +43,13 @@
 #   4. The flight recorder this run wrote, then the four hosts.
 #      "Every verdict lands as one JSON line. mine_audit.py turns real
 #       verdicts back into counterexamples — which is where the messages
-#       you just watched came from. Four hosts, one engine, one rule file,
-#       all in log mode. Enforce is one env var. A rule set earns that by
-#       being right about real traffic first, and this is the evidence."
+#       you just watched came from. Four hosts, one engine. All four are
+#       recording, none of them are acting: they run a deterministic-only
+#       set in log mode, which costs nothing and never touches a message.
+#       Everything you just watched it do — the rewrite, the rejection —
+#       is switched on inside this repo and nowhere else. A rule set earns
+#       the right to change what a human sees by being right about real
+#       traffic first, and that log is how it earns it."
 #      Ends on: the log, and the repo URL.
 #
 # Before demoing on a machine for the first time:
@@ -56,7 +60,7 @@
 # Deliberately without `set -e`. A failed beat prints and the rest still runs.
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-RULES="$ROOT/scripts/demo-rules"
+RULES="$ROOT/.mop"
 CORPUS="$ROOT/evals/counterexamples/real-history"
 AUTO=""
 OFFLINE=""
@@ -144,7 +148,7 @@ run_check() {
 
 beat_deterministic() {
   beat "the rule set, and the half with no model in it"
-  run "mop rules list --rules-dir scripts/demo-rules --compact" \
+  run "mop rules list --rules-dir .mop --compact" \
     mop rules list --rules-dir "$RULES" --compact
   echo
   show_message "cheerleading/you-re-right-i-followed-the"
@@ -161,12 +165,12 @@ beat_deterministic() {
 
 beat_judge() {
   beat "the same message, judge on"
-  run_check "mop check --rules-dir scripts/demo-rules" \
+  run_check "mop check --rules-dir .mop" \
     mop check --rules-dir "$RULES" \
       --file <(example "cheerleading/you-re-right-i-followed-the")
   echo
   show_message "clean/shipped-as-77d3215-382-tests-pas"
-  run_check "mop check --rules-dir scripts/demo-rules" \
+  run_check "mop check --rules-dir .mop" \
     mop check --rules-dir "$RULES" \
       --file <(example "clean/shipped-as-77d3215-382-tests-pas")
 }
@@ -174,7 +178,7 @@ beat_judge() {
 beat_reject() {
   beat "what no rewrite can fix"
   show_message "doable-work/where-to-go-next-say-the-word"
-  run_check "mop check --rules-dir scripts/demo-rules" \
+  run_check "mop check --rules-dir .mop" \
     mop check --rules-dir "$RULES" \
       --file <(example "doable-work/where-to-go-next-say-the-word")
 }

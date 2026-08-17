@@ -1,11 +1,17 @@
-# The rule set the demo runs on — a `.mop/` overlay like a project would write.
+# This repo's own rule set, and the one the demo runs on.
+#
+# MOP acts — rewrites and rejects — only inside this repo. Discovery walks up
+# from the cwd to the first `.git` ancestor, so any `mop check` run from
+# anywhere in this tree resolves these rules with no flags, and a `mop check`
+# run from any other repo resolves none of them. The machine-wide set at
+# ~/.mop/rules is deliberately a different, smaller thing: deterministic
+# detectors only, judged without a rewrite, for the record-only host gates.
+# See docs/integration.md.
 #
 # Five rules, chosen to put every moving part on screen: two deterministic
 # detectors (regex, length), three judged by the model, and both dispositions
 # (rewrite and reject). Everything here is copied verbatim from rules/ with
 # `active: true`; nothing is demo-only behavior.
-#
-# Passed explicitly: `mop check --rules-dir scripts/demo-rules`.
 
 rules:
 

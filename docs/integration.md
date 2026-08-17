@@ -198,7 +198,18 @@ nothing:
 Canonical dirs on this machine: audit at `/Users/bryancostanza/.mop/audit`
 (daily-rotated `YYYY-MM-DD.jsonl`, UTC-dated), rules at
 `/Users/bryancostanza/.mop/rules` — deterministic detectors only, so a verdict
-costs no model call and adds no latency. Per-host wiring:
+costs no model call and adds no latency.
+
+**That machine-wide set records; it does not act.** Every host below runs
+`MOP_MODE=log`, so no message anywhere is rewritten or withheld. The full rule
+set — both dispositions, model-judged rules included — lives in the MOP repo's
+own `.mop/rules.yml` and resolves only from inside that tree, because discovery
+stops at the first `.git` ancestor. The enforcing Claude Code gate is likewise
+repo-scoped, installed as that repo's `.claude/settings.json`. Keep the two
+apart: widening the machine-wide set is how a host starts acting on work that
+never opted in.
+
+Per-host wiring:
 
 - **Hermes** — `EnvironmentVariables` in
   `~/Library/LaunchAgents/ai.hermes.gateway.plist` (`MOP_AUDIT_LOG`,

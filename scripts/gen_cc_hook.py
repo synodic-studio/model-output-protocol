@@ -9,6 +9,12 @@ is a corrective gate — it BLOCKS the turn and tells the agent what to change,
 never rewrites. That matches MOP's `reject` disposition; the `rewrite` path
 does not survive into this host (see docs/ + ADR on host shapes).
 
+Because of that, only `reject`-disposition rules are emitted by default: a
+`rewrite` rule asks for a wording change this host has no channel to make, so
+blocking a turn over one spends the user's attention on something the gate was
+supposed to absorb. `--include-rewrite` restores them for callers who want the
+agent to revise its own prose.
+
 Usage:
   python scripts/gen_cc_hook.py [--builtins] [--rules-dir DIR] [--llm-only]
       > .claude/settings.json      # (or merge the "Stop" block into yours)
@@ -61,6 +67,11 @@ def main() -> int:
     ap.add_argument("--builtins", action="store_true", help="include packaged built-in rules")
     ap.add_argument("--rules-dir", type=Path, default=None, help="explicit rules dir (bypass discovery)")
     ap.add_argument("--llm-only", action="store_true", help="only include detector: llm rules")
+    ap.add_argument(
+        "--include-rewrite",
+        action="store_true",
+        help="also emit rewrite-disposition rules (default: reject only)",
+    )
     ap.add_argument("--timeout", type=int, default=30, help="hook timeout seconds")
     args = ap.parse_args()
 
@@ -68,6 +79,14 @@ def main() -> int:
     rules = [r for r in rules if getattr(r, "active", True)]
     if args.llm_only:
         rules = [r for r in rules if r.detector == "llm"]
+    if not args.include_rewrite:
+        rules = [r for r in rules if r.disposition == "reject"]
+    if not rules:
+        raise SystemExit(
+            "No rules to emit. A Stop hook can only block, so it needs at least "
+            "one reject-disposition rule; pass --include-rewrite to emit the "
+            "rewrite ones anyway."
+        )
 
     settings = {
         "hooks": {

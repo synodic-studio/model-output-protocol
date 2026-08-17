@@ -43,9 +43,14 @@ def rules_dir(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
+# An explicit empty dir, not discovery: without it these ask whatever `.mop/`
+# happens to sit above the test process for its opinion, which is a different
+# test on a developer's machine than in a clean checkout.
 def test_no_rules_accepts_and_passes_through(tmp_path: Path) -> None:
     audit = tmp_path / "audit"
-    result = gate("anything at all", host="test", audit_dir=audit)
+    empty = tmp_path / "no-rules"
+    empty.mkdir()
+    result = gate("anything at all", host="test", rules_dir=empty, audit_dir=audit)
     assert result.verdict.__class__.__name__ == "Accepted"
     assert result.deliver == "anything at all"
     assert result.replacement() is None  # nothing to change
@@ -56,7 +61,9 @@ def test_no_rules_accepts_and_passes_through(tmp_path: Path) -> None:
 
 def test_audit_optional(tmp_path: Path) -> None:
     # No audit_dir → no files written, no crash.
-    gate("hello", host="test")
+    empty = tmp_path / "no-rules"
+    empty.mkdir()
+    gate("hello", host="test", rules_dir=empty)
     assert not list(tmp_path.glob("**/*.jsonl"))
 
 

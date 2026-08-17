@@ -67,6 +67,15 @@ For the stateful gate, hosts inject an `evaluator` (built via `mop.build_evaluat
 
 Rules are validated against a counterexample corpus in [`evals/`](evals/) — positive and negative example messages each rule should (or should not) flag. Run `uv run python evals/harness.py` for the deterministic rules, add `--llm` (and an API key) for `llm` rules, or `--rule <name>` to target one.
 
+## Recording everywhere, acting only here
+
+The two are deliberately separate deployments, because a rule set earns the right to change what a human sees by being right about real traffic first.
+
+- **Recording** is machine-wide. Every host gate runs `MOP_MODE=log` against a machine-local rule set of deterministic detectors only, judged with `--no-rewrite`: it costs no model call, adds no latency, and never alters a message. Its whole job is to fill the flight recorder with real verdicts that [`scripts/mine_audit.py`](scripts/mine_audit.py) turns back into counterexamples.
+- **Acting** is scoped to this repo. [`.mop/rules.yml`](.mop/rules.yml) carries the full set — both dispositions, model-judged rules included — and `.mop/` discovery stops at the first `.git` ancestor, so it resolves from anywhere in this tree and from nowhere else. [`.claude/settings.json`](.claude/settings.json) installs the generated blocking Stop hook for Claude Code sessions started here, and only here.
+
+Nothing outside this repo rewrites or withholds an agent's message. Flipping that is a per-host `MOP_MODE` env var, documented in [`docs/integration.md`](docs/integration.md) and deliberately not yet taken.
+
 ## Demo
 
 `scripts/demo.sh` is a guided tour of the gate: what fires with no model at all, what one model call repairs, what no rewrite can fix, what passes untouched, and the flight recorder the run just wrote. Every message on screen is read out of the counterexample corpus, harvested from live agent sessions. `--auto` runs it start to finish for rehearsal; `--offline` skips the model beats. Evaluator settings come from `scripts/demo.env` — see `scripts/demo.env.example`.
