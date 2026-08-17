@@ -123,6 +123,22 @@ def _unresolved_payload(names: list[str], rules: list[Rule]) -> list[dict]:
     return [{"name": n, "guidance": guidance_by_name.get(n, "")} for n in names]
 
 
+def _format_unresolved(unresolved: list[dict]) -> str:
+    """Human-readable `name: guidance` block, wrapped under a hanging indent.
+
+    Guidance is a multi-line YAML block; printed raw it wraps at the terminal
+    edge and loses the association between a rule and its reason.
+    """
+    blocks = []
+    for item in unresolved:
+        guidance = " ".join((item["guidance"] or "").split())
+        body = textwrap.fill(
+            guidance, width=76, initial_indent="      ", subsequent_indent="      "
+        )
+        blocks.append(f"  {item['name']}\n{body}" if guidance else f"  {item['name']}")
+    return "\n".join(blocks)
+
+
 def _render(verdict: Verdict, rules: list[Rule], *, as_json: bool) -> int:
     if isinstance(verdict, Rewritten):
         unresolved = _unresolved_payload(verdict.unresolved, rules)
@@ -133,14 +149,12 @@ def _render(verdict: Verdict, rules: list[Rule], *, as_json: bool) -> int:
         }
         human = f"rewritten\n\n{verdict.rewritten}"
         if unresolved:
-            lines = "\n".join(f"  {v['name']}: {v['guidance']}" for v in unresolved)
-            human += f"\n\nunresolved (fix these yourself):\n{lines}"
+            human += f"\n\nunresolved (fix these yourself):\n{_format_unresolved(unresolved)}"
         code = EXIT_REWRITTEN
     elif isinstance(verdict, Rejected):
         unresolved = _unresolved_payload(verdict.unresolved, rules)
         payload = {"verdict": "rejected", "rewritten": None, "unresolved": unresolved}
-        lines = "\n".join(f"  {v['name']}: {v['guidance']}" for v in unresolved)
-        human = f"rejected\n{lines}"
+        human = f"rejected\n{_format_unresolved(unresolved)}"
         code = EXIT_REJECTED
     else:
         # Accepted. (AcceptedFailedOpen is unreachable in one-shot mode —
@@ -253,6 +267,11 @@ def _build_parser() -> argparse.ArgumentParser:
     rules_p.add_argument("--rules-dir", type=Path, help="Explicit rules dir (skips discovery)")
     rules_p.add_argument("--rules-file", type=Path, help="Explicit rules file (skips discovery)")
     rules_p.add_argument("--json", action="store_true", dest="as_json")
+    rules_p.add_argument(
+        "--compact",
+        action="store_true",
+        help="One line per rule: drop the guidance text, show the disposition",
+    )
     rules_sub = rules_p.add_subparsers(dest="rules_command", required=False)
     rules_p.set_defaults(rules_command="list")
 
@@ -262,6 +281,7 @@ def _build_parser() -> argparse.ArgumentParser:
     list_p.add_argument("--rules-file", type=Path, default=argparse.SUPPRESS)
     list_p.add_argument("--json", action="store_true", dest="as_json",
                         default=argparse.SUPPRESS)
+    list_p.add_argument("--compact", action="store_true", default=argparse.SUPPRESS)
 
     show_p = rules_sub.add_parser("show", help="Show details of one rule.")
     show_p.add_argument("--builtins", action="store_true", default=argparse.SUPPRESS)
@@ -292,14 +312,21 @@ def _run_rules(args: argparse.Namespace, all_rules: list[Rule]) -> int:
         else:
             print(f"Rules ({len(all_rules)}):")
             print("  " + "-" * 78)
-            print("  " + f"{'Name':<42s} {'Status':<10s} {'Kind':<14s} Source")
+            print(
+                "  "
+                + f"{'Name':<42s} {'Status':<10s} {'Detector':<10s} "
+                + ("Disposition" if args.compact else "Source")
+            )
             print("  " + "-" * 78)
             for r in all_rules:
                 status = "active" if r.active else "inactive"
-                kind = "lint" if r.lint else r.detector
-                print(f"  {r.name:<42s} {status:<10s} {kind:<14s} {r.source_file}")
+                # Compact mode names the detector even for built-in lints —
+                # the point of the column is which of the four kinds runs.
+                kind = r.detector if args.compact or not r.lint else "lint"
+                last = r.disposition if args.compact else r.source_file
+                print(f"  {r.name:<42s} {status:<10s} {kind:<10s} {last}")
                 guidance = (r.guidance or "").strip()
-                if guidance:
+                if guidance and not args.compact:
                     wrapped = textwrap.fill(guidance, width=72, initial_indent="      ", subsequent_indent="      ")
                     print(wrapped)
         return EXIT_ACCEPTED
