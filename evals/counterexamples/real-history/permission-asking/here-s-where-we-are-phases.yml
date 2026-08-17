@@ -39,6 +39,7 @@ text: 'Here''s where we are: phases 0 → 3b are all landed. The harness seam is
   '
 expected_violations:
 - no-permission-asking-for-doable-work
+- length-cap-chat
 expected_clean: []
 rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
   into bucket 'permission-asking'. Verify expected_violations against current active

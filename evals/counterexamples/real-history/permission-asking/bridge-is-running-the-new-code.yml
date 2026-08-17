@@ -33,6 +33,7 @@ text: 'Bridge is running the new code (file mtime 08:30:31, process started 08:3
   '
 expected_violations:
 - no-permission-asking-for-doable-work
+- length-cap-chat
 expected_clean: []
 rationale: Real assistant response harvested from patchbay-relay session logs. Pre-screened
   into bucket 'permission-asking'. Verify expected_violations against current active

@@ -2,80 +2,77 @@
 #
 # Opt-in (active: false by default): length caps, no cheerleading, no trailing
 # summaries, no process narration. Enable per project in a `.mop/`.
+#
+# `guidance` is the ONLY rule text the judge sees (mop/evaluators.py) and what
+# gets injected into the agent's system prompt (mop/hooks.py). Write it as an
+# instruction to the agent, not a description of the detector.
 
 rules:
-- name: length-cap-chat
-  active: false
-  detector: length
-  description: Chat messages over ~200 words should be moved to a document
-  parameters:
-    # `length` fires when a configured cap is exceeded. Use max_words and/or
-    # max_chars; a deployment tunes the number per interface (tight for chat,
-    # loose for a web UI) via its own .mop/ — see docs/adr/0001.
-    max_words: 200
-  rationale: 'Current models trained with verbose-output rewards. Chat is for short
 
-    interactions; longer content overwhelms mobile readers and is better
+  - name: length-cap-chat
+    active: false
+    detector: length
+    description: Chat messages over ~200 words should be moved to a document
+    guidance: |
+      Keep it short. Past ~200 words, the detail belongs in a document — write
+      the file and send a one-line summary plus the link, not the wall of text.
+    parameters:
+      # `length` fires when a configured cap is exceeded. Use max_words and/or
+      # max_chars; a deployment tunes the number per interface (tight for chat,
+      # loose for a web UI) via its own .mop/ — see docs/adr/0001.
+      max_words: 200
+    rationale: |
+      Current models trained with verbose-output rewards. Chat is for short
+      interactions; longer content overwhelms mobile readers and is better
+      delivered as a linked document.
 
-    delivered as a linked document.
+  - name: no-cheerleading-phrases
+    active: false
+    detector: regex
+    description: Empty praise patterns ("Great job!", "You're absolutely right!")
+    guidance: |
+      Drop the praise and open with the substance. No "great question", no
+      "you're absolutely right", no "excellent work" — agreement is shown by
+      acting on it, and a correction needs the correction, not applause.
+    parameters:
+      patterns:
+        - "(?i)\\bgreat (job|work|question|catch|point)\\b"
+        - "(?i)\\bexcellent (work|job|question|point|catch)\\b"
+        - "(?i)\\b(absolutely|totally|exactly|completely) (right|correct)\\b"
+        - "(?i)\\bwhat a (great|good) (idea|question)\\b"
+        # Bare "You're right" opening a sentence — the most common form, and
+        # the one the qualified variants above miss.
+        - "(?i)(^|[.!?)\\]\"']\\s+|\\n\\s*)you('| a)?re right\\b"
+        - "(?i)\\bgood (catch|call|question)\\b"
+    rationale: |
+      Current RLHF training rewards effusive acknowledgment. The praise
+      reads as sycophantic to most users. Models will likely train this
+      out as user preference data accumulates against it.
 
-    '
-- name: no-cheerleading-phrases
-  detector: regex
-  description: Empty praise patterns ("Great job!", "You're absolutely right!")
-  parameters:
-    patterns:
-    - (?i)\bgreat (job|work|question|catch)\b
-    - (?i)\bexcellent (work|job|question)\b
-    - (?i)\b(absolutely|totally) (right|correct)\b
-    - (?i)\bwhat a (great|good) (idea|question)\b
-  rationale: 'Current RLHF training rewards effusive acknowledgment. The praise
+  - name: no-trailing-summary
+    active: false
+    detector: llm
+    description: Don't restate what was just done if the user can see the result
+    guidance: |
+      End on the last substantive point. Don't close by recapping work the user
+      can already see — the diff, the file, the command output. A closing line
+      earns its place only when it carries something the artifact doesn't.
+    rationale: |
+      Trailing summaries are filler when the user can see the work
+      directly. They double the message length without adding information.
+      Current models default to summaries due to training that rewards
+      explicit recap.
 
-    reads as sycophantic to most users. Models will likely train this
-
-    out as user preference data accumulates against it.
-
-    '
-  active: false
-- name: no-trailing-summary
-  active: false
-  detector: llm
-  description: Don't restate what was just done if the user can see the result
-  parameters:
-    prompt: 'Does this message end with a summary of what was just done, when
-
-      the user has direct access to the result (diff, file, output)?
-
-      Examples: "I''ve now updated the config and added the import."
-
-      after the user already sees the diff.
-
-      '
-  rationale: 'Trailing summaries are filler when the user can see the work
-
-    directly. They double the message length without adding information.
-
-    Current models default to summaries due to training that rewards
-
-    explicit recap.
-
-    '
-- name: no-process-narration
-  active: false
-  detector: llm
-  description: State outcomes, don't narrate the process
-  parameters:
-    prompt: 'Does this message describe what the agent is *about to do* or
-
-      *just did* in process terms ("Now I''ll check...", "Let me run...",
-
-      "I''m going to...") rather than reporting the result?
-
-      '
-  rationale: 'Current models narrate process as a habit from chat-style training.
-
-    Narration is appropriate before an action; not after. Once the
-
-    action is done, report the outcome.
-
-    '
+  - name: no-process-narration
+    active: false
+    detector: llm
+    description: State outcomes, don't narrate the process
+    guidance: |
+      Report the outcome, not the procedure. After the work is done, say what
+      happened and what it means — not "now I'll check", "let me run",
+      "I'm going to". Narrating an action you are about to take is fine;
+      narrating one you already took instead of its result is not.
+    rationale: |
+      Current models narrate process as a habit from chat-style training.
+      Narration is appropriate before an action; not after. Once the
+      action is done, report the outcome.
