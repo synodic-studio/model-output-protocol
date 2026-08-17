@@ -4,6 +4,10 @@
 # universals (attribute honestly, link references, label lists, don't ping
 # without a finding). Rules ship `active: false`; set `active: true` here or
 # enable them in a project's `.mop/`. More voice rules live in `voice.yml`.
+#
+# `guidance` is the ONLY rule text the judge sees (mop/evaluators.py) and what
+# gets injected into the agent's system prompt (mop/hooks.py). Write it as an
+# instruction to the agent, not a description of the detector.
 
 rules:
 
@@ -11,6 +15,10 @@ rules:
     active: false
     detector: regex
     description: Status pings that announce completion with no actionable signal
+    guidance: |
+      Say nothing when there is nothing actionable. Don't send "scan complete",
+      "no issues found", or "nothing to report" — silence is the correct output,
+      and a ping that carries no finding trains the user to ignore every ping.
     parameters:
       patterns:
         - "(?i)completed (with|without) (no |any )?(findings|issues|errors)"
@@ -27,11 +35,6 @@ rules:
     description: Don't invent quotes, citations, or attribute claims to people
     guidance: |
       Attribute quotes and claims only to sources present in the user's input or verifiable context. Never invent quotes, citations, or attribute claims to named people.
-    parameters:
-      prompt: |
-        Does this message attribute a quote or specific claim to a named
-        person, source, or commenter that wasn't in the user's input or
-        verifiable context?
     rationale: |
       Fabricated attribution is a hallucination class with reputational risk.
       Quote only what's in source material.
@@ -42,12 +45,6 @@ rules:
     description: External references should be clickable URLs
     guidance: |
       When referencing an external resource (PR, issue, doc, dashboard, external service), include the clickable URL. Local code references (functions, files in the working tree) don't need links.
-    parameters:
-      prompt: |
-        Does this message reference an external resource (PR, issue, doc,
-        external service, dashboard) by name without a clickable URL?
-        Internal references the user can find locally (function names,
-        files in the working tree) do not require links.
     rationale: |
       Especially for chat/mobile interfaces, references without links are
       effectively unreachable for the user.
@@ -56,27 +53,15 @@ rules:
     active: false
     detector: llm
     description: Don't drop class/method/file/symbol names into prose when plain English works
-    parameters:
-      prompt: |
-        Does this message use code identifiers (class names, method names,
-        `Module.symbol` paths, file names with extensions, query parameter
-        keys, struct fields) inline in user-facing prose where a plain
-        English noun phrase would carry the same meaning?
-
-        Examples of violations:
-          - "App's CheckInURLAction.decide accepts the universal link..."
-            (could be: "the app accepts the universal link...")
-          - "Updated config.yaml to enable the new flag"
-            (could be: "Updated the config to enable the new flag")
-          - "The PaymentService.processRefund call returns..."
-            (could be: "The refund call returns...")
-
-        EXCEPTIONS — identifiers ARE appropriate when:
-          - The user is actively editing/debugging that exact symbol
-          - The user asked about that specific identifier by name
-          - The identifier is inside a code fence, not prose
-          - The identifier IS the subject of the change being reported
-            ("Renamed `foo` to `bar`")
+    guidance: |
+      Name the thing, not the symbol. In prose, use the plain English noun
+      phrase wherever it carries the same meaning as a class name, method name,
+      `Module.symbol` path, file name, query key, or struct field: "the app
+      accepts the universal link", not "App's CheckInURLAction.decide accepts";
+      "updated the config", not "updated config.yaml". Identifiers are correct
+      when the user is editing or asked about that exact symbol, when the
+      identifier IS the subject of the change ("renamed foo to bar"), or when
+      it sits inside a code fence.
     rationale: |
       Code identifiers in prose are jargon tax. They force the reader to
       bridge from internal naming to the human concept on every reference.
@@ -92,14 +77,8 @@ rules:
       Label every list item so the user can cite it back. Use numbers
       (1, 2, 3) for ordered or sequential lists and CAPITAL letters
       (A, B, C) for unordered lists. Never use plain bullets (-, *, •).
-    parameters:
-      prompt: |
-        Does this message present a list with plain bullets (-, *, •) or
-        otherwise unlabeled items, instead of labels the user can cite back?
-        Lists must be labeled: numbers (1, 2, 3) for ordered / sequential
-        lists, CAPITAL letters (A, B, C) for unordered lists.
-        NOT a violation: a single inline item, content inside code blocks
-        or fences, or prose that merely contains a dash.
+      A single inline item, content inside a code fence, and prose that merely
+      contains a dash are not lists.
     rationale: |
       The user references list items back by label ("do B", "redo 2") in
       voice/chat. Plain bullets can't be cited in shorthand. Capital letters

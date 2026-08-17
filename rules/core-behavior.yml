@@ -7,6 +7,10 @@
 # Rules ship `active: false`; set `active: true` here, or enable them in a
 # project's `.mop/`, to load them into the evaluator. Additional behavior
 # rules live in `behavior.yml`.
+#
+# `guidance` is the ONLY rule text the judge sees (mop/evaluators.py) and what
+# gets injected into the agent's system prompt (mop/hooks.py). Write it as an
+# instruction to the agent, not a description of the detector.
 
 rules:
 
@@ -14,17 +18,13 @@ rules:
     active: false
     detector: llm
     description: Don't say "noted" / "got it" / "will do" without doing or persisting
-    parameters:
-      prompt: |
-        Does this message acknowledge a user request ("noted", "got it",
-        "I'll do X") without showing the action was actually taken or
-        scheduled (file written, todo added, calendar event created)?
-        EXCEPTION: when the user shared context that does not require
-        action ("FYI", "for your knowledge"), acknowledgment alone is fine.
     guidance: |
       Acknowledgment must include action when an action was requested.
       Either do the work and report it, or write a persistent record (todo,
-      memory, scheduled task) so the acknowledgment isn't empty.
+      memory, scheduled task) so the acknowledgment isn't empty. "Noted",
+      "got it", "will do" on their own are not the work. When the user only
+      shared context and asked for nothing ("FYI"), acknowledgment alone is
+      fine.
     rationale: |
       Empty acknowledgments give the user false confidence that the agent
       will follow through. Most acknowledgments without persistence are
@@ -34,15 +34,12 @@ rules:
     active: false
     detector: llm
     description: Don't assert facts without checking
-    parameters:
-      prompt: |
-        Does this message assert a fact about file/state/external-system
-        existence (file exists, command succeeded, service is running, PR
-        merged) that the agent could have verified but didn't? Does NOT
-        apply to general code reasoning where verification is impractical.
     guidance: |
       Before asserting, verify. Check the file, run the command, query the
-      log, read the source. Recall is not verification.
+      log, read the source. Recall is not verification. This covers claims
+      about state the agent could have checked — a file exists, a command
+      succeeded, a service is running, a PR merged — not general code
+      reasoning where there is nothing to check.
     rationale: |
       Confident assertions about state without verification produce
       hallucinated details that mislead the user. Verification is cheap;
@@ -52,23 +49,13 @@ rules:
     active: false
     detector: llm
     description: Don't say "I'll do X" as a standalone — do it now or frame as a plan
-    parameters:
-      prompt: |
-        Does this message contain future-tense commitments ("I'll add",
-        "I will check", "Let me update") that the agent has the tools to
-        do RIGHT NOW but didn't, AND that aren't framed as part of an
-        explicit plan needing approval?
-
-        Acceptable patterns:
-          - Action taken + report ("Added X. Tests pass.")
-          - Plan framing ("Plan: do A, B, C. OK to proceed?")
-        Unacceptable pattern:
-          - Standalone future tense ("I'll add X." with no action this turn)
     guidance: |
       LLM agents have no persistence between turns. Standalone "I'll do X"
       promises evaporate the moment the conversation ends.
-      Either do the action now and report it, or frame the work as a plan
-      requesting approval before proceeding.
+      Either do the action now and report it ("Added X. Tests pass."), or
+      frame the work as a plan requesting approval ("Plan: A, B, C. OK to
+      proceed?"). A bare "I'll add X" with no action this turn is the
+      violation.
     rationale: |
       Future-tense commitments without action are empty promises. The
       conversation ending kills the intent. Either act this turn or
