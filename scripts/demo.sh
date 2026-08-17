@@ -2,11 +2,9 @@
 #
 # A guided tour of the gate, and a smoke test of an evaluator.
 #
-# Every message on screen is a real one, read out of the counterexample
-# corpus in evals/ — harvested from live agent sessions, not written for
-# the slide. Five beats: what fires without a model, what one model call
-# repairs, what no rewrite can fix, what passes untouched, and the
-# flight recorder the run just wrote.
+# The screen shows artifacts, not narration. You do the talking. Every
+# message it puts up is a real one, read out of the counterexample corpus
+# in evals/ — harvested from live agent sessions, not written for the slide.
 #
 #   --auto     run start to finish with no interaction, for rehearsal
 #   --offline  skip the three beats that call a model
@@ -15,6 +13,40 @@
 # Nothing needs typing; one keypress advances a beat. Evaluator settings
 # come from scripts/demo.env, which is gitignored; see demo.env.example.
 # Without it the model beats are skipped and the rest is unaffected.
+#
+# Four beats, each ending in a prompt that says what pressing the key means:
+#
+#   1. The rule set, then a real message checked with the rewrite turned off.
+#      "Six rules, four detectors. regex, length and script are
+#       deterministic — a match is a violation on its own, and no model gets
+#       a vote. That's what just ran: no API key, no network, no model, two
+#       tenths of a second. Half this gate runs in CI."
+#      Ends on: exit 2, and the clock.
+#
+#   2. The same message with the judge on, then a clean one.
+#      "One call judges the model-rules and repairs the deterministic hits,
+#       which it's handed as confirmed violations it can't argue with. Then
+#       MOP re-runs the patterns against the rewrite — a fix only counts if
+#       it cleared. The verdict is derived from what changed; the model
+#       never gets to declare its own message accepted. And it's not a
+#       rubber stamp in either direction — that second one it left alone."
+#      Ends on: exit 1, then exit 0.
+#
+#   3. A message that comes back rejected instead. The point of the thing.
+#      "Nothing's wrong with the wording. It had the tools, the context and
+#       a recommendation, and handed the decision back anyway. Rewriting
+#       that would launder it. So the rule carries disposition reject: the
+#       text is withheld and the reason goes back to the agent — the only
+#       thing that can actually fix it, by doing the work."
+#      Ends on: exit 2, and the guidance the agent gets back.
+#
+#   4. The flight recorder this run wrote, then the four hosts.
+#      "Every verdict lands as one JSON line. mine_audit.py turns real
+#       verdicts back into counterexamples — which is where the messages
+#       you just watched came from. Four hosts, one engine, one rule file,
+#       all in log mode. Enforce is one env var. A rule set earns that by
+#       being right about real traffic first, and this is the evidence."
+#      Ends on: the log, and the repo URL.
 #
 # Before demoing on a machine for the first time:
 #   1. `uv sync` in this checkout, so `uv run mop` starts instantly.
@@ -37,7 +69,10 @@ while [ $# -gt 0 ]; do
     --auto) AUTO="1"; shift ;;
     --offline) OFFLINE="1"; shift ;;
     --model) MODEL="$2"; shift 2 ;;
-    -h|--help) sed -n '3,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    # The header comment IS the documentation, so print it rather than a
+    # duplicate usage string — extracted by shape, not by line number, so it
+    # cannot drift out of sync with the beats above.
+    -h|--help) awk 'NR>1 && /^#/{sub(/^# ?/,""); print; next} NR>1{exit}' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -49,7 +84,6 @@ else
 fi
 
 beat() { printf '\n%s%s-- %s %s%s\n\n' "$D" "$B" "$1" "$(printf '%.0s-' $(seq 1 $((56 - ${#1}))))" "$R"; }
-say()  { printf '%s%s%s\n' "$D" "$1" "$R"; }
 warn() { printf '%s%s%s\n' "$Y" "$1" "$R"; }
 
 # Every prompt says what pressing the key means, so there is never a question
@@ -75,17 +109,20 @@ example() {
     "$CORPUS/$1.yml"
 }
 
+# The repo-relative path, so anyone can open the file and check that the
+# message on screen is the message in the corpus.
 show_message() {
-  printf '  %sthe message%s   %s%s%s\n' "$B" "$R" "$D" "$1" "$R"
+  printf '  %s%s%s\n' "$D" "evals/counterexamples/real-history/$1.yml" "$R"
   example "$1" | fold -s -w 74 | sed "s/^/    /"
   echo
 }
 
-# Print the command, then run it.
+# Print the command, then run it. No folding — this one prints a table, and
+# folding a table is how you get a separator line cut in half on a projector.
 run() {
   local label="$1"; shift
   printf '%s  $ %s%s\n\n' "$C" "$label" "$R"
-  "$@" 2>&1 | fold -s -w 76 | sed 's/^/  /'
+  "$@" 2>&1 | sed 's/^/  /'
 }
 
 # Same, plus the exit code — that is how a host branches on a verdict, so it
@@ -105,39 +142,33 @@ run_check() {
 
 # ---------------------------------------------------------------------------
 
-beat_rules() {
-  beat "the rule set"
+beat_deterministic() {
+  beat "the rule set, and the half with no model in it"
   run "mop rules list --rules-dir scripts/demo-rules --compact" \
     mop rules list --rules-dir "$RULES" --compact
   echo
-  say "  Four detectors. regex, length and script are deterministic — a match"
-  say "  is a violation on its own. llm rules are judged by a model."
-  say "  A [reject] rule is one no rewrite can satisfy."
-}
-
-beat_deterministic() {
-  beat "half the gate has no model in it"
   show_message "cheerleading/you-re-right-i-followed-the"
+  # Timed on screen, because "no model in the loop" is a claim until the
+  # clock backs it up.
+  local started ended
+  started=$(date +%s%N)
   run_check "mop check --rule no-cheerleading-phrases --no-rewrite" \
     mop check --rules-dir "$RULES" --rule no-cheerleading-phrases --no-rewrite \
       --file <(example "cheerleading/you-re-right-i-followed-the")
-  echo
-  say "  No API key, no network, no model. This is the mode CI runs in."
+  ended=$(date +%s%N)
+  printf '  %s%d ms, no network%s\n' "$D" $(( (ended - started) / 1000000 )) "$R"
 }
 
-beat_rewrite() {
-  beat "one model call, and the rewrite is re-checked"
-  say "  Same message, with the judge switched on."
-  echo
+beat_judge() {
+  beat "the same message, judge on"
   run_check "mop check --rules-dir scripts/demo-rules" \
     mop check --rules-dir "$RULES" \
       --file <(example "cheerleading/you-re-right-i-followed-the")
   echo
-  say "  One call judges the llm rules AND repairs the deterministic hits,"
-  say "  which it is handed as confirmed violations it cannot argue with."
-  say "  MOP then re-runs the patterns against the rewrite: a fix only counts"
-  say "  if it actually cleared. The verdict is derived from what changed —"
-  say "  the model never gets to declare its own message accepted."
+  show_message "clean/shipped-as-77d3215-382-tests-pas"
+  run_check "mop check --rules-dir scripts/demo-rules" \
+    mop check --rules-dir "$RULES" \
+      --file <(example "clean/shipped-as-77d3215-382-tests-pas")
 }
 
 beat_reject() {
@@ -146,32 +177,13 @@ beat_reject() {
   run_check "mop check --rules-dir scripts/demo-rules" \
     mop check --rules-dir "$RULES" \
       --file <(example "doable-work/where-to-go-next-say-the-word")
-  echo
-  say "  Nothing is wrong with the wording. The agent had the tools, the"
-  say "  context, and a recommendation, and handed the decision back anyway."
-  say "  Rewriting that would launder it. So the rule carries disposition"
-  say "  reject: the text is withheld and the reason goes back to the agent,"
-  say "  which is the one thing that can actually fix it — by doing the work."
 }
 
-beat_clean() {
-  beat "and a message it leaves alone"
-  show_message "clean/shipped-as-77d3215-382-tests-pas"
-  run_check "mop check --rules-dir scripts/demo-rules" \
-    mop check --rules-dir "$RULES" \
-      --file <(example "clean/shipped-as-77d3215-382-tests-pas")
-  echo
-  say "  The corpus carries clean messages as ballast, for exactly this."
-}
-
-beat_audit() {
-  beat "the flight recorder"
-  say "  MOP_AUDIT_LOG was set to a scratch dir for this run. Every verdict"
-  say "  above landed in it as one JSON line."
-  echo
+beat_close() {
+  beat "the flight recorder, and where it runs"
   printf '%s  $ cat %s/*.jsonl%s\n\n' "$C" "${AUDIT_DIR/#$HOME/\~}" "$R"
   uv run --quiet --project "$ROOT" python - "$AUDIT_DIR" <<'PY' | sed 's/^/  /'
-import glob, json, sys, textwrap
+import glob, json, sys
 
 for path in sorted(glob.glob(f"{sys.argv[1]}/*.jsonl")):
     for line in open(path):
@@ -184,25 +196,12 @@ for path in sorted(glob.glob(f"{sys.argv[1]}/*.jsonl")):
             print(f'{"":<10s} {"":<8s}  -> {name}')
 PY
   echo
-  say "  That is the corpus feeding itself: scripts/mine_audit.py turns real"
-  say "  verdicts back into counterexamples, which is where the messages in"
-  say "  this demo came from."
-}
-
-beat_close() {
-  beat "where it actually runs"
   printf '  %spatchbay-relay%s   in-process filter on the Telegram send path\n' "$B" "$R"
   printf '  %sHermes%s           plugin on the outbound hook\n' "$B" "$R"
   printf '  %sClaude Code%s      Stop hook — no pre-delivery hook exists, so it\n' "$B" "$R"
   printf '                   observes and records rather than gates\n'
   printf '  %spi%s               extension on message_end, shells to the CLI\n\n' "$B" "$R"
-  say "  One engine, one rule file. Every host is in log mode — judge and"
-  say "  record, never alter — writing to the recorder you just saw. Enforce"
-  say "  is one env var, deliberately not yet flipped: a rule set earns that"
-  say "  by being right about real traffic first, and the recorder is the"
-  say "  evidence."
-  echo
-  printf '  %sgithub.com/synodic-studio/model-output-protocol%s\n' "$D" "$R"
+  printf '  %shttps://github.com/synodic-studio/model-output-protocol%s\n' "$D" "$R"
 }
 
 # ---------------------------------------------------------------------------
@@ -245,17 +244,14 @@ trap 'rm -rf "$AUDIT_DIR"' EXIT
 printf '\n  %sMOP%s  %sthe gate between an agent and the person reading it%s\n' \
   "$B" "$R" "$D" "$R"
 
-beat_rules;         advance "press for the first message"
 beat_deterministic; advance "press to switch the judge on"
 if [ -z "$OFFLINE" ]; then
-  beat_rewrite;     advance "press for one it will not rewrite"
-  beat_reject;      advance "press for a clean one"
-  beat_clean;       advance "press for the audit log"
+  beat_judge;       advance "press for one it will not rewrite"
+  beat_reject;      advance "press for the flight recorder"
 else
   echo
-  warn "  (the three model beats need an evaluator — see --offline)"
-  advance "press for the audit log"
+  warn "  (the two model beats need an evaluator — see --offline)"
+  advance "press for the flight recorder"
 fi
-beat_audit;         advance "press to finish"
 beat_close
 echo

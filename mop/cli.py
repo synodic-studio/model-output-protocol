@@ -311,13 +311,13 @@ def _run_rules(args: argparse.Namespace, all_rules: list[Rule]) -> int:
             print(json.dumps(payload))
         else:
             print(f"Rules ({len(all_rules)}):")
-            print("  " + "-" * 78)
+            print("  " + "-" * 74)
             print(
                 "  "
                 + f"{'Name':<42s} {'Status':<10s} {'Detector':<10s} "
                 + ("Disposition" if args.compact else "Source")
             )
-            print("  " + "-" * 78)
+            print("  " + "-" * 74)
             for r in all_rules:
                 status = "active" if r.active else "inactive"
                 # Compact mode names the detector even for built-in lints —
