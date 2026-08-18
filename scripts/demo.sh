@@ -114,6 +114,16 @@ show_message() {
   echo
 }
 
+# One rule as it is actually written. The table says six rules exist; this
+# says a rule is a file you edit, which is the claim that matters. Extracted
+# by name rather than by line range, so it cannot drift out of sync.
+show_rule() {
+  printf '%s  $ awk "/name: %s/,/^$/" .mop/rules.yml%s\n\n' "$C" "$1" "$R"
+  awk -v n="  - name: $1" '$0==n{f=1} f&&/^[[:space:]]*$/{exit} f{print "    " $0}' \
+    "$RULES/rules.yml"
+  echo
+}
+
 # Print the command, then run it. No folding — this one prints a table, and
 # folding a table is how you get a separator line cut in half on a projector.
 run() {
@@ -147,6 +157,7 @@ beat_deterministic() {
   run "mop rules list --rules-dir .mop --compact" \
     mop rules list --rules-dir "$RULES" --compact
   echo
+  show_rule "no-cheerleading-phrases"
   show_message "cheerleading/you-re-right-i-followed-the"
   # Timed on screen, because "no model in the loop" is a claim until the
   # clock backs it up.
