@@ -106,11 +106,43 @@ example() {
 }
 
 # The repo-relative path, so anyone can open the file and check that the
-# message on screen is the message in the corpus.
+# message on screen is the message in the corpus. Given a rule name, the spans
+# that rule's patterns match are highlighted — using those same patterns, read
+# out of the same file the check reads, so this cannot show a match the rule
+# would not make.
 show_message() {
   printf '  %sthe message under review%s  %s%s%s\n' \
     "$B" "$R" "$D" "evals/counterexamples/real-history/$1.yml" "$R"
-  example "$1" | fold -s -w 74 | sed "s/^/    /"
+  uv run --quiet --project "$ROOT" python - \
+    "$CORPUS/$1.yml" "$RULES/rules.yml" "${2:-}" "$([ -t 1 ] && echo 1)" <<'PY'
+import re, sys, textwrap, yaml
+
+msg_path, rules_path, rule_name, color = sys.argv[1:5]
+text = yaml.safe_load(open(msg_path))["text"].strip()
+
+spans = []
+if rule_name and color:
+    for rule in yaml.safe_load(open(rules_path))["rules"]:
+        if rule["name"] == rule_name:
+            for pat in rule.get("parameters", {}).get("patterns", []):
+                spans += [m.span() for m in re.finditer(pat, text) if m.end() > m.start()]
+
+merged: list[list[int]] = []
+for start, end in sorted(spans):
+    if merged and start <= merged[-1][1]:
+        merged[-1][1] = max(merged[-1][1], end)
+    else:
+        merged.append([start, end])
+
+# Markers rather than escapes, because textwrap counts an ANSI sequence as
+# visible width and would fold the line short by however many bytes it carries.
+OPEN, CLOSE = "\x00", "\x01"
+for start, end in reversed(merged):
+    text = text[:start] + OPEN + text[start:end] + CLOSE + text[end:]
+
+for line in textwrap.wrap(text, 74) or [""]:
+    print("    " + line.replace(OPEN, "\033[7m").replace(CLOSE, "\033[0m"))
+PY
   echo
 }
 
@@ -118,7 +150,7 @@ show_message() {
 # says a rule is a file you edit, which is the claim that matters. Extracted
 # by name rather than by line range, so it cannot drift out of sync.
 show_rule() {
-  printf '%s  $ awk "/name: %s/,/^$/" .mop/rules.yml%s\n\n' "$C" "$1" "$R"
+  printf '  %sthe rule that fires%s  %s%s%s\n\n' "$B" "$R" "$D" ".mop/rules.yml" "$R"
   awk -v n="  - name: $1" '$0==n{f=1} f&&/^[[:space:]]*$/{exit} f{print "    " $0}' \
     "$RULES/rules.yml"
   echo
@@ -165,7 +197,7 @@ beat_deterministic() {
     mop rules list --rules-dir "$RULES" --compact
   echo
   show_rule "no-cheerleading-phrases"
-  show_message "cheerleading/you-re-right-i-followed-the"
+  show_message "cheerleading/you-re-right-i-followed-the" "no-cheerleading-phrases"
   # Timed on screen, because "no model in the loop" is a claim until the
   # clock backs it up.
   local started ended
