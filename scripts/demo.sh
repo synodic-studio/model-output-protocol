@@ -2,9 +2,11 @@
 #
 # A guided tour of the gate, and a smoke test of an evaluator.
 #
-# The screen shows artifacts, not narration. You do the talking. Every
-# message it puts up is a real one, read out of the counterexample corpus
-# in evals/ — harvested from live agent sessions, not written for the slide.
+# You do the talking; the screen carries artifacts and a few fragments to
+# speak around. Fragments, never sentences — a room given prose reads it
+# instead of listening. Every message it puts up is a real one, read out of
+# the counterexample corpus in evals/ — harvested from live agent sessions,
+# not written for the slide.
 #
 #   --auto     run start to finish with no interaction, for rehearsal
 #   --offline  skip the two beats that call a model
@@ -14,43 +16,27 @@
 # come from scripts/demo.env, which is gitignored; see demo.env.example.
 # Without it the model beats are skipped and the rest is unaffected.
 #
-# Four beats, each ending in a prompt that says what pressing the key means:
+# Each beat opens with a few fragments on screen and ends in a prompt that
+# says what pressing the key means. Those fragments are the speaking prompts;
+# they live in the beat functions, not here, so there is one copy of them.
 #
 #   1. The rule set, then a real message checked with the rewrite turned off.
-#      "Six rules, four detectors. regex, length and script are
-#       deterministic — a match is a violation on its own, and no model gets
-#       a vote. That's what just ran: no API key, no network, no model, two
-#       tenths of a second. Half this gate runs in CI."
-#      Ends on: exit 2, and the clock.
+#      Ends on: exit 2, and the clock — the claim that no model ran, timed.
 #
-#   2. The same message with the judge on, then a clean one.
-#      "One call judges the model-rules and repairs the deterministic hits,
-#       which it's handed as confirmed violations it can't argue with. Then
-#       MOP re-runs the patterns against the rewrite — a fix only counts if
-#       it cleared. The verdict is derived from what changed; the model
-#       never gets to declare its own message accepted. And it's not a
-#       rubber stamp in either direction — that second one it left alone."
+#   2. The same message with the judge on, then a clean one it leaves alone.
 #      Ends on: exit 1, then exit 0.
 #
 #   3. A message that comes back rejected instead. The point of the thing.
-#      "Nothing's wrong with the wording. It had the tools, the context and
-#       a recommendation, and handed the decision back anyway. Rewriting
-#       that would launder it. So the rule carries disposition reject: the
-#       text is withheld and the reason goes back to the agent — the only
-#       thing that can actually fix it, by doing the work."
+#      Worth saying out loud: the reason goes back to the agent, which is the
+#      only thing that can actually fix it, and it fixes it by doing the work.
 #      Ends on: exit 2, and the guidance the agent gets back.
 #
 #   4. The flight recorder this run wrote, then the four hosts.
-#      "Every verdict lands as one JSON line. mine_audit.py turns real
-#       verdicts back into counterexamples — the one you just watched get
-#       rejected came out of that log; the other two out of raw session
-#       logs. Four hosts, one engine; three of them have written records on
-#       this machine. None of them are acting: they run a deterministic-only
-#       set in log mode, which costs nothing and never touches a message.
-#       Everything you just watched it do — the rewrite, the rejection —
-#       is switched on inside this repo and nowhere else. A rule set earns
-#       the right to change what a human sees by being right about real
-#       traffic first, and that log is how it earns it."
+#      Worth saying out loud: mine_audit.py turns real verdicts back into
+#      counterexamples — the rejected one came out of that log, the other two
+#      out of raw session logs. A rule set earns the right to change what a
+#      human sees by being right about real traffic first, in log mode, and
+#      that is why it is gating in this repo and nowhere else yet.
 #      Ends on: the log, and the repo URL.
 #
 # Before demoing on a machine for the first time:
@@ -90,6 +76,11 @@ fi
 
 beat() { printf '\n%s%s-- %s %s%s\n\n' "$D" "$B" "$1" "$(printf '%.0s-' $(seq 1 $((56 - ${#1}))))" "$R"; }
 warn() { printf '%s%s%s\n' "$Y" "$1" "$R"; }
+
+# What the beat is about, in fragments you speak around — never sentences, or
+# the room reads instead of listening. Runs before the commands so it frames
+# what is about to appear rather than explaining what already scrolled by.
+points() { for p in "$@"; do printf '    %s·%s %s\n' "$D" "$R" "$p"; done; echo; }
 
 # Every prompt says what pressing the key means, so there is never a question
 # of whether it advances the slide or ends your turn. Keys come from fd 3, the
@@ -148,7 +139,10 @@ run_check() {
 # ---------------------------------------------------------------------------
 
 beat_deterministic() {
-  beat "the rule set, and the half with no model in it"
+  beat "1  half the gate needs no model at all"
+  points "6 rules, 4 kinds of detector" \
+         "regex, length, script — a match is a violation on its own" \
+         "no key, no network, no model, and it is on the clock"
   run "mop rules list --rules-dir .mop --compact" \
     mop rules list --rules-dir "$RULES" --compact
   echo
@@ -165,7 +159,11 @@ beat_deterministic() {
 }
 
 beat_judge() {
-  beat "the same message, judge on"
+  beat "2  the judge, and what it is not allowed to decide"
+  points "one call: judges the model-rules, repairs the rest" \
+         "deterministic hits handed over as confirmed, not up for debate" \
+         "patterns re-run on the rewrite — a fix only counts if it cleared" \
+         "the verdict is derived from what changed, never self-declared"
   run_check "mop check --rules-dir .mop" \
     mop check --rules-dir "$RULES" \
       --file <(example "cheerleading/you-re-right-i-followed-the")
@@ -177,7 +175,11 @@ beat_judge() {
 }
 
 beat_reject() {
-  beat "what no rewrite can fix"
+  beat "3  what no rewrite can fix"
+  points "the wording is fine — the behavior is the violation" \
+         "it had the tools, the context and a recommendation, and asked anyway" \
+         "rewriting that would launder it" \
+         "so the rule rejects: text withheld, reason back to the agent"
   show_message "doable-work/where-to-go-next-say-the-word"
   run_check "mop check --rules-dir .mop" \
     mop check --rules-dir "$RULES" \
@@ -185,8 +187,14 @@ beat_reject() {
 }
 
 beat_close() {
-  beat "the flight recorder, and where it runs"
-  printf '%s  $ cat %s/*.jsonl%s\n\n' "$C" "${AUDIT_DIR/#$HOME/\~}" "$R"
+  beat "4  the flight recorder, and where it runs"
+  points "one JSON line per verdict" \
+         "the corpus is mined from real verdicts, not written for the slide" \
+         "four hosts, one engine" \
+         "gating here only — everywhere else it watches and records"
+  # The variable, not the expansion: a raw mktemp path under /var/folders is
+  # unreadable on a projector and reads as a scratch file rather than a log.
+  printf '%s  $ cat $MOP_AUDIT_LOG/*.jsonl%s\n\n' "$C" "$R"
   uv run --quiet --project "$ROOT" python - "$AUDIT_DIR" <<'PY' | sed 's/^/  /'
 import glob, json, sys
 
@@ -246,8 +254,11 @@ AUDIT_DIR=$(mktemp -d)
 export MOP_AUDIT_LOG="$AUDIT_DIR"
 trap 'rm -rf "$AUDIT_DIR"' EXIT
 
-printf '\n  %sMOP%s  %sthe gate between an agent and the person reading it%s\n' \
+printf '\n  %sMOP%s  %sthe gate between an agent and the person reading it%s\n\n' \
   "$B" "$R" "$D" "$R"
+points "a system prompt is a request — it holds until it quietly stops" \
+       "these rules live outside the prompt, as a gate every message passes" \
+       "so the question stops being 'did it behave' and becomes 'what was blocked'"
 
 beat_deterministic; advance "press to switch the judge on"
 if [ -z "$OFFLINE" ]; then
