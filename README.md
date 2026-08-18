@@ -30,6 +30,33 @@ Rules carry one of four **detectors**:
 
 A single evaluation runs the deterministic rules first (a match is a hard violation the model cannot wave away), then **one** LLM call judges the `llm` rules and produces a best-effort rewrite that also repairs the deterministic hits. The deterministic rules are re-checked against the rewrite.
 
+```mermaid
+flowchart TD
+    M[agent message] --> D[run every regex, script and length rule]
+    D --> H["confirmed violations
+    a match is authoritative — the model gets no vote"]
+
+    H --> Q{is a repair path open?}
+
+    Q -->|"--no-rewrite (CI, lint)"| L[judge the llm rules, apply nothing]
+    L --> LV{anything unresolved?}
+    LV -->|yes| LR["exit 2 — violation, no repair attempted"]
+    LV -->|no| LA["exit 0 — accepted"]
+
+    Q -->|yes| E["one llm call
+    judges the llm rules, and rewrites to clear
+    the confirmed violations along with them"]
+    E --> R[re-run the deterministic rules against the rewrite]
+    R --> V{"did the text change?
+    is anything still unresolved?"}
+    V -->|unchanged, nothing left| A["Accepted — exit 0"]
+    V -->|changed, nothing left| W["Rewritten — exit 1"]
+    V -->|changed, some left| P["Rewritten, partial — exit 1"]
+    V -->|unchanged, some left| J["Rejected — exit 2"]
+```
+
+Both paths through that diamond can end at exit 2, and they do not mean the same thing. Under `--no-rewrite` nothing was ever offered a repair; under the full path a repair was attempted and did not clear.
+
 The **verdict is derived**, never declared by the model — computed from *(did the text change? is `unresolved` empty?)*:
 
 - **`Accepted`** — nothing changed, nothing unresolved.
