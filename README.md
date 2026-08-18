@@ -123,9 +123,56 @@ flowchart LR
 ```
 
 - **Hermes and patchbay-relay put MOP upstream of delivery**, so a rewrite or a rejection can still change what arrives. Hermes streams progressively, so a rewrite lands as an *edit* to a message the reader already glimpsed — fine for a rewrite, a real gap for a redaction, and the reason gated surfaces want streaming off.
-- **Claude Code and pi have no seam that can rewrite or suppress the final text.** Claude Code's hook surface covers tool calls and turn boundaries, not assistant messages; pi emits outgoing text only through observe-only events, after streaming. Both can record a verdict and neither can act on one. Enforcement there means gating downstream — which is what patchbay-relay does when it dispatches pi.
+- **Claude Code and pi have no seam that can *substitute* the final text.** Claude Code's hook surface covers tool calls and turn boundaries, not assistant messages; pi emits outgoing text only through observe-only events, after streaming. Claude Code still gets a corrective gate out of this — a Stop hook can block the turn and hand back reasons, so the agent fixes its own message on the next one. pi's `message_end` carries no result, so there it is record-only. Substitution there means gating downstream, which is what patchbay-relay does when it dispatches pi.
 
 That asymmetry is the reason the deployment split below exists at all.
+
+### What each verdict can actually do, per host
+
+A verdict is only worth as much as the host's ability to act on it. Same engine, same four outcomes, four different endings.
+
+```mermaid
+flowchart TD
+    A["agent produces a message"] --> G["MOP evaluates"]
+
+    G --> AC["Accepted"]
+    G --> RW["Rewritten"]
+    G --> RJ["Rejected"]
+
+    AC --> D1(["delivered unchanged"])
+
+    RW --> RWQ{"can the host substitute text?"}
+    RWQ -->|"Hermes, patchbay-relay"| D2(["repaired text is delivered;
+    the agent is never told"])
+    RWQ -->|"Claude Code, pi"| D3["no channel to substitute text, so
+    rewrite rules are not emitted for this host"]
+
+    RJ --> RJQ{"what can the host do with a refusal?"}
+
+    RJQ -->|"Hermes, patchbay-relay
+    (upstream of delivery)"| W(["text withheld,
+    reason returned to the agent"])
+
+    RJQ -->|"Claude Code Stop hook
+    (already on screen)"| B["the turn is BLOCKED and the reason
+    is handed back; the gate never rewrites"]
+    B --> B2["agent revises on its next turn"]
+    B2 --> A
+
+    RJQ -->|"pi (observe-only)"| L(["verdict recorded, message stands"])
+
+    RJQ -->|"MCP gate — parked, no live host"| J["agent may submit a justification"]
+    J --> JQ{"re-evaluated"}
+    JQ -->|"cleared"| D1
+    JQ -->|"still refused, budget remaining"| J
+    JQ -->|"4 attempts spent"| FO(["AcceptedFailedOpen —
+    delivered with a system note"])
+```
+
+Two loops there are worth separating.
+
+- **Claude Code's is real and running in this repo.** [`.claude/settings.json`](.claude/settings.json) carries a generated Stop hook that judges the turn's final message against the `reject`-disposition rules and blocks the turn with concrete instructions when one fires. The agent fixes it on the next turn. Because the message is already on screen and there is no substitution channel, `rewrite` rules are deliberately left out — blocking a turn over a wording change spends the reader's attention on exactly what the gate was supposed to absorb. Regenerate with [`scripts/gen_cc_hook.py`](scripts/gen_cc_hook.py) after changing rules, and restart the session; hooks load once at startup.
+- **The MCP justification loop is parked, but it did run.** `submit_message` / `submit_justification` in [`mop/protocol.py`](mop/protocol.py) let an agent argue its case up to `max_justification_attempts` (default 4) before the gate fails open and delivers the original with a system note. It was mounted in-process in patchbay-relay's `cc-sdk-mop` harness and went out with that harness when the bridge became pi-only — so what's parked is a path that carried real traffic, not a sketch. It predates the two-phase engine and is not deterministic-authoritative, which is why it stays parked rather than being revived piecemeal: the loop design is worth keeping, the verdict logic is not. See ADR-0005.
 
 ## Recording everywhere, acting only here
 

@@ -264,8 +264,8 @@ PY
   # delivery it is on rather than only naming the hook.
   printf '  %spatchbay-relay%s   filter in the Telegram send path, before delivery\n' "$B" "$R"
   printf '  %sHermes%s           plugin on transform_llm_output, before delivery\n' "$B" "$R"
-  printf '  %sClaude Code%s      Stop hook — fires after the text is on screen, so\n' "$B" "$R"
-  printf '                   it records a verdict it could never have acted on\n'
+  printf '  %sClaude Code%s      Stop hook — no channel to substitute text, so it\n' "$B" "$R"
+  printf '                   blocks the turn and the agent revises; reject rules only\n'
   printf '  %spi%s               extension shipped, not installed here; message_end\n' "$B" "$R"
   printf '                   is observe-only, so it would record too\n\n'
   printf '  %shttps://github.com/synodic-studio/model-output-protocol%s\n' "$D" "$R"
