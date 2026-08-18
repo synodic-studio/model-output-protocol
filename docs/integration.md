@@ -73,21 +73,17 @@ It exposes exactly the seam MOP needs.
 
 ---
 
-## B. patchbay-relay — historical reference, currently removed (Shape 1)
+## B. patchbay-relay — SHIPPED (log mode), Shape 1
 
-> **Shipped (wiring):** [`integrations/patchbay/`](../integrations/patchbay/)
-> documents the one-call reactivation — `mop.host.filter_text(response,
-> host="patchbay-relay")` in `_send_response`, log mode. Gates whatever harness
-> patchbay dispatches (Pi, codex, …) at the delivery boundary.
+> **Live:** `mop.host.filter_text(response, host="patchbay-relay")` in
+> `_send_response`, log mode, fail-open. Gates whatever harness patchbay
+> dispatches (Pi, codex, …) at the delivery boundary. Wiring notes in
+> [`integrations/patchbay/`](../integrations/patchbay/).
 
+The call sits *after* the silence/noisy drops, so the audit record means "what
+the user got", not "what the agent emitted".
 
-MOP was **fully integrated here once and then removed** — the Claude-SDK and
-`cc-sdk-mop` harnesses were deleted in commit `906b0c8` when the bridge went
-`pi`-only, and the README now marks it "alpha, no longer actively developed."
-So this is *not* a live integration; it's a paved road if the bridge is ever
-revived.
-
-- **Chokepoint (still ideal):** `_send_response` at `patchbay/telegram_send.py:240`,
+- **Chokepoint:** `_send_response` at `patchbay/telegram_send.py:303`,
   immediately after the file-sentinel extraction (`:267`) and alongside two
   existing out-of-band filters — `_is_silence_narration` (`:273`) and
   `_is_noisy_status` (`:285`). MOP slots in as a third, more capable filter on

@@ -241,7 +241,7 @@ beat_close() {
   beat "4  the flight recorder, and where it runs"
   points "one JSON line per verdict" \
          "the corpus is mined from real verdicts, not written for the slide" \
-         "four hosts, one engine" \
+         "three hosts writing on this machine, one engine" \
          "gating here only — everywhere else it watches and records"
   # The variable, not the expansion: a raw mktemp path under /var/folders is
   # unreadable on a projector and reads as a scratch file rather than a log.
@@ -260,11 +260,14 @@ for path in sorted(glob.glob(f"{sys.argv[1]}/*.jsonl")):
             print(f'{"":<10s} {"":<8s}  -> {name}')
 PY
   echo
-  printf '  %spatchbay-relay%s   in-process filter on the Telegram send path\n' "$B" "$R"
-  printf '  %sHermes%s           plugin on the outbound hook\n' "$B" "$R"
-  printf '  %sClaude Code%s      Stop hook — no pre-delivery hook exists, so it\n' "$B" "$R"
-  printf '                   observes and records rather than gates\n'
-  printf '  %spi%s               extension on message_end, shells to the CLI\n\n' "$B" "$R"
+  # Where each host's seam sits decides what it can do, so say which side of
+  # delivery it is on rather than only naming the hook.
+  printf '  %spatchbay-relay%s   filter in the Telegram send path, before delivery\n' "$B" "$R"
+  printf '  %sHermes%s           plugin on transform_llm_output, before delivery\n' "$B" "$R"
+  printf '  %sClaude Code%s      Stop hook — fires after the text is on screen, so\n' "$B" "$R"
+  printf '                   it records a verdict it could never have acted on\n'
+  printf '  %spi%s               extension shipped, not installed here; message_end\n' "$B" "$R"
+  printf '                   is observe-only, so it would record too\n\n'
   printf '  %shttps://github.com/synodic-studio/model-output-protocol%s\n' "$D" "$R"
 }
 

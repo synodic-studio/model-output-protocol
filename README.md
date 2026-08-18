@@ -95,6 +95,38 @@ For the stateful gate, hosts inject an `evaluator` (built via `mop.build_evaluat
 
 Rules are validated against a counterexample corpus in [`evals/`](evals/) — positive and negative example messages each rule should (or should not) flag. Run `uv run python evals/harness.py` for the deterministic rules, add `--llm` (and an API key) for `llm` rules, or `--rule <name>` to target one.
 
+## Where MOP sits in each host's message lifecycle
+
+What a host can enforce is decided entirely by the seam it exposes. Two of these hand over the text before the human sees it; the other two only ever see it on the way past.
+
+```mermaid
+flowchart LR
+    subgraph HE["Hermes — plugin on transform_llm_output"]
+        direction LR
+        H1[model] --> H2[turn_finalizer] --> H3{{MOP}} --> H4[surface] --> H5([the human])
+    end
+
+    subgraph PB["patchbay-relay — filter_text in _send_response"]
+        direction LR
+        P1[model] --> P2[silence and noise drops] --> P3{{MOP}} --> P4[markdown, then chunking] --> P5([the human])
+    end
+
+    subgraph CC["Claude Code — Stop hook"]
+        direction LR
+        C1[model] --> C2([the human]) --> C3{{MOP}}
+    end
+
+    subgraph PI["pi — extension on message_end"]
+        direction LR
+        I1[model] --> I2([the human]) --> I3{{MOP}}
+    end
+```
+
+- **Hermes and patchbay-relay put MOP upstream of delivery**, so a rewrite or a rejection can still change what arrives. Hermes streams progressively, so a rewrite lands as an *edit* to a message the reader already glimpsed — fine for a rewrite, a real gap for a redaction, and the reason gated surfaces want streaming off.
+- **Claude Code and pi have no seam that can rewrite or suppress the final text.** Claude Code's hook surface covers tool calls and turn boundaries, not assistant messages; pi emits outgoing text only through observe-only events, after streaming. Both can record a verdict and neither can act on one. Enforcement there means gating downstream — which is what patchbay-relay does when it dispatches pi.
+
+That asymmetry is the reason the deployment split below exists at all.
+
 ## Recording everywhere, acting only here
 
 The two are deliberately separate deployments, because a rule set earns the right to change what a human sees by being right about real traffic first.
