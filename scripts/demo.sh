@@ -108,7 +108,8 @@ example() {
 # The repo-relative path, so anyone can open the file and check that the
 # message on screen is the message in the corpus.
 show_message() {
-  printf '  %s%s%s\n' "$D" "evals/counterexamples/real-history/$1.yml" "$R"
+  printf '  %sthe message under review%s  %s%s%s\n' \
+    "$B" "$R" "$D" "evals/counterexamples/real-history/$1.yml" "$R"
   example "$1" | fold -s -w 74 | sed "s/^/    /"
   echo
 }
@@ -151,7 +152,7 @@ beat_deterministic() {
   # clock backs it up.
   local started ended
   started=$(date +%s%N)
-  run_check "mop check --rule no-cheerleading-phrases --no-rewrite" \
+  run_check "mop check --rule no-cheerleading-phrases --no-rewrite --file <(the message above)" \
     mop check --rules-dir "$RULES" --rule no-cheerleading-phrases --no-rewrite \
       --file <(example "cheerleading/you-re-right-i-followed-the")
   ended=$(date +%s%N)
@@ -164,12 +165,12 @@ beat_judge() {
          "deterministic hits handed over as confirmed, not up for debate" \
          "patterns re-run on the rewrite — a fix only counts if it cleared" \
          "the verdict is derived from what changed, never self-declared"
-  run_check "mop check --rules-dir .mop" \
+  run_check "mop check --rules-dir .mop --file <(the message above)" \
     mop check --rules-dir "$RULES" \
       --file <(example "cheerleading/you-re-right-i-followed-the")
   echo
   show_message "clean/shipped-as-77d3215-382-tests-pas"
-  run_check "mop check --rules-dir .mop" \
+  run_check "mop check --rules-dir .mop --file <(the message above)" \
     mop check --rules-dir "$RULES" \
       --file <(example "clean/shipped-as-77d3215-382-tests-pas")
 }
@@ -181,7 +182,7 @@ beat_reject() {
          "rewriting that would launder it" \
          "so the rule rejects: text withheld, reason back to the agent"
   show_message "doable-work/where-to-go-next-say-the-word"
-  run_check "mop check --rules-dir .mop" \
+  run_check "mop check --rules-dir .mop --file <(the message above)" \
     mop check --rules-dir "$RULES" \
       --file <(example "doable-work/where-to-go-next-say-the-word")
 }
@@ -257,8 +258,7 @@ trap 'rm -rf "$AUDIT_DIR"' EXIT
 printf '\n  %sMOP%s  %sthe gate between an agent and the person reading it%s\n\n' \
   "$B" "$R" "$D" "$R"
 points "a system prompt is a request — it holds until it quietly stops" \
-       "these rules live outside the prompt, as a gate every message passes" \
-       "so the question stops being 'did it behave' and becomes 'what was blocked'"
+       "these rules live outside the prompt, as a gate every message passes"
 
 beat_deterministic; advance "press to switch the judge on"
 if [ -z "$OFFLINE" ]; then
