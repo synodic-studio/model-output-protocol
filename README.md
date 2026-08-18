@@ -87,92 +87,17 @@ See [`mop/cli.py`](mop/cli.py).
 
 MOP calls [litellm](https://github.com/BerriAI/litellm) in-process and owns its own tier aliases (`mop.evaluators.MODEL_ALIASES`): `small` (default) = `deepseek/deepseek-v4-flash`, with provisional `medium`/`large`. Select with `--model <tier|provider/model>` or `MOP_EVALUATOR_MODEL`. Structured output degrades gracefully across providers (json_schema → json_object → prompt-only), validated by pydantic. MOP is evaluator-agnostic — a host can inject any callable matching the `Evaluator` signature.
 
-## Integration shape (MCP gate)
-
-For the stateful gate, hosts inject an `evaluator` (built via `mop.build_evaluator(rules=...)`) and a `deliver(text, system_note?)` callable for whatever channel they own (Telegram, Slack, web socket). `mop.protocol_prompt(rules)` returns a system-prompt fragment so the agent knows the protocol exists. See `mop/protocol.py` and `mop/mcp.py`.
-
 ## Evals
 
 Rules are validated against a counterexample corpus in [`evals/`](evals/) — positive and negative example messages each rule should (or should not) flag. Run `uv run python evals/harness.py` for the deterministic rules, add `--llm` (and an API key) for `llm` rules, or `--rule <name>` to target one.
 
-## Where MOP sits in each host's message lifecycle
+## Host integrations
 
-What a host can enforce is decided entirely by the seam it exposes. Two of these hand over the text before the human sees it; the other two only ever see it on the way past.
+MOP runs in Hermes (plugin on `transform_llm_output`), patchbay-relay (`filter_text` in the Telegram send path), and Claude Code (a generated blocking Stop hook, this repo only). A pi extension ships but is not installed here.
 
-```mermaid
-flowchart LR
-    subgraph HE["Hermes — plugin on transform_llm_output"]
-        direction LR
-        H1[model] --> H2[turn_finalizer] --> H3{{MOP}} --> H4[surface] --> H5([the human])
-    end
+What a host can enforce depends entirely on the seam it exposes: some hand the text over before the human sees it and some only ever see it going past, so the same verdict has a different ending in each. [`docs/lifecycle.md`](docs/lifecycle.md) diagrams that — where the gate sits, what each verdict can do, and the two shapes a gate can take. [`docs/integration.md`](docs/integration.md) is the per-host how-to.
 
-    subgraph PB["patchbay-relay — filter_text in _send_response"]
-        direction LR
-        P1[model] --> P2[silence and noise drops] --> P3{{MOP}} --> P4[markdown, then chunking] --> P5([the human])
-    end
-
-    subgraph CC["Claude Code — Stop hook"]
-        direction LR
-        C1[model] --> C2([the human]) --> C3{{MOP}}
-    end
-
-    subgraph PI["pi — extension on message_end"]
-        direction LR
-        I1[model] --> I2([the human]) --> I3{{MOP}}
-    end
-```
-
-- **Hermes and patchbay-relay put MOP upstream of delivery**, so a rewrite or a rejection can still change what arrives. Hermes streams progressively, so a rewrite lands as an *edit* to a message the reader already glimpsed — fine for a rewrite, a real gap for a redaction, and the reason gated surfaces want streaming off.
-- **Claude Code and pi have no seam that can *substitute* the final text.** Claude Code's hook surface covers tool calls and turn boundaries, not assistant messages; pi emits outgoing text only through observe-only events, after streaming. Claude Code still gets a corrective gate out of this — a Stop hook can block the turn and hand back reasons, so the agent fixes its own message on the next one. pi's `message_end` carries no result, so there it is record-only. Substitution there means gating downstream, which is what patchbay-relay does when it dispatches pi.
-
-That asymmetry is the reason the deployment split below exists at all.
-
-### What each verdict can actually do, per host
-
-A verdict is only worth as much as the host's ability to act on it. Same engine, same four outcomes, four different endings.
-
-```mermaid
-flowchart TD
-    A["agent produces a message"] --> G["MOP evaluates"]
-
-    G --> AC["Accepted"]
-    G --> RW["Rewritten"]
-    G --> RJ["Rejected"]
-
-    AC --> D1(["delivered unchanged"])
-
-    RW --> RWQ{"can the host substitute text?"}
-    RWQ -->|"Hermes, patchbay-relay"| D2(["repaired text is delivered;
-    the agent is never told"])
-    RWQ -->|"Claude Code, pi"| D3["no channel to substitute text, so
-    rewrite rules are not emitted for this host"]
-
-    RJ --> RJQ{"what can the host do with a refusal?"}
-
-    RJQ -->|"Hermes, patchbay-relay
-    (upstream of delivery)"| W(["text withheld,
-    reason returned to the agent"])
-
-    RJQ -->|"Claude Code Stop hook
-    (already on screen)"| B["the turn is BLOCKED and the reason
-    is handed back; the gate never rewrites"]
-    B --> B2["agent revises on its next turn"]
-    B2 --> A
-
-    RJQ -->|"pi (observe-only)"| L(["verdict recorded, message stands"])
-
-    RJQ -->|"MCP gate — parked, no live host"| J["agent may submit a justification"]
-    J --> JQ{"re-evaluated"}
-    JQ -->|"cleared"| D1
-    JQ -->|"still refused, budget remaining"| J
-    JQ -->|"4 attempts spent"| FO(["AcceptedFailedOpen —
-    delivered with a system note"])
-```
-
-Two loops there are worth separating.
-
-- **Claude Code's is real and running in this repo.** [`.claude/settings.json`](.claude/settings.json) carries a generated Stop hook that judges the turn's final message against the `reject`-disposition rules and blocks the turn with concrete instructions when one fires. The agent fixes it on the next turn. Because the message is already on screen and there is no substitution channel, `rewrite` rules are deliberately left out — blocking a turn over a wording change spends the reader's attention on exactly what the gate was supposed to absorb. Regenerate with [`scripts/gen_cc_hook.py`](scripts/gen_cc_hook.py) after changing rules, and restart the session; hooks load once at startup.
-- **The MCP justification loop is parked, but it did run.** `submit_message` / `submit_justification` in [`mop/protocol.py`](mop/protocol.py) let an agent argue its case up to `max_justification_attempts` (default 4) before the gate fails open and delivers the original with a system note. It was mounted in-process in patchbay-relay's `cc-sdk-mop` harness and went out with that harness when the bridge became pi-only — so what's parked is a path that carried real traffic, not a sketch. It predates the two-phase engine and is not deterministic-authoritative, which is why it stays parked rather than being revived piecemeal: the loop design is worth keeping, the verdict logic is not. See ADR-0005.
+For the stateful MCP gate, a host injects an `evaluator` (built via `mop.build_evaluator(rules=...)`) and a `deliver(text, system_note?)` callable for whatever channel it owns. `mop.protocol_prompt(rules)` returns a system-prompt fragment so the agent knows the protocol exists. See [`mop/protocol.py`](mop/protocol.py) and [`mop/mcp.py`](mop/mcp.py).
 
 ## Recording everywhere, acting only here
 

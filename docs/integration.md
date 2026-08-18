@@ -1,5 +1,7 @@
 # Integrating MOP into a host
 
+For the shape of the thing first — where the gate sits in each host, what each verdict can do there, and the two forms a gate can take — see [`lifecycle.md`](lifecycle.md). This file is the per-host how-to.
+
 MOP is an output gate: give it the text an agent is about to send a human, get
 back a verdict — **accepted** (deliver as-is), **rewritten** (deliver the
 cleaned text), or **rejected** (don't deliver; the agent may justify). This doc
