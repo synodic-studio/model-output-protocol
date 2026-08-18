@@ -157,8 +157,9 @@ run_check() {
 
 beat_deterministic() {
   beat "1  half the gate needs no model at all"
-  points "6 rules, 4 kinds of detector" \
-         "regex, length, script — a match is a violation on its own" \
+  points "6 rules — half decide on their own, half ask a model" \
+         "a pattern match is a violation, and no model gets a vote" \
+         "--no-rewrite is lint mode: verdict only, never a repair" \
          "no key, no network, no model, and it is on the clock"
   run "mop rules list --rules-dir .mop --compact" \
     mop rules list --rules-dir "$RULES" --compact
