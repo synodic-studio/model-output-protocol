@@ -151,8 +151,14 @@ PY
 # by name rather than by line range, so it cannot drift out of sync.
 show_rule() {
   printf '  %sthe rule that fires%s  %s%s%s\n\n' "$B" "$R" "$D" ".mop/rules.yml" "$R"
-  awk -v n="  - name: $1" '$0==n{f=1} f&&/^[[:space:]]*$/{exit} f{print "    " $0}' \
-    "$RULES/rules.yml"
+  awk -v n="  - name: $1" '
+    $0==n{f=1}
+    f&&/^[[:space:]]*$/{exit}
+    f&&/^[[:space:]]*guidance:/{g=1; print "    " $0; next}
+    f&&g&&/^[[:space:]]*[a-z_]+:/{g=0}
+    f&&g{ if (!shown) { print "      " $0; shown=1 } else if (!dots) { print "      ..."; dots=1 }; next }
+    f&&/^[[:space:]]*- "/{ pats++; if (pats<=2) print "    " $0; else if (pats==3) print "      ... and more"; next }
+    f{print "    " $0}' "$RULES/rules.yml"
   echo
 }
 
