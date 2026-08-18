@@ -142,7 +142,13 @@ run_check() {
   case "$code" in
     0) printf '\n  %sexit 0 — accepted%s\n' "$G" "$R" ;;
     1) printf '\n  %sexit 1 — rewritten%s\n' "$Y" "$R" ;;
-    2) printf '\n  %sexit 2 — rejected%s\n' "$E" "$R" ;;
+    # Exit 2 arrives two unrelated ways, and beat 3 needs the word "rejected"
+    # to mean only its way. With --no-rewrite there was never a repair path,
+    # so a violation lands here having never been offered one.
+    2) case "$label" in
+         *--no-rewrite*) printf '\n  %sexit 2 — violation, no repair attempted%s\n' "$E" "$R" ;;
+         *)              printf '\n  %sexit 2 — rejected%s\n' "$E" "$R" ;;
+       esac ;;
     *) printf '\n  %sexit %d%s\n' "$E" "$code" "$R" ;;
   esac
 }
@@ -268,8 +274,8 @@ trap 'rm -rf "$AUDIT_DIR"' EXIT
 
 printf '\n  %sMOP%s  %sthe gate between an agent and the person reading it%s\n\n' \
   "$B" "$R" "$D" "$R"
-points "a system prompt is a request — it holds until it quietly stops" \
-       "these rules live outside the prompt, as a gate every message passes"
+points "prompt rules drift, and nothing tells you when they did" \
+       "these live outside the prompt, as a gate every message passes through"
 
 beat_deterministic; advance "press to switch the judge on"
 if [ -z "$OFFLINE" ]; then
